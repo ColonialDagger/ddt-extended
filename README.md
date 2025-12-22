@@ -33,5 +33,5 @@ py -3.12 -m venv .venv
 4. Build the program.
 
 ```powershell
-python -m nuitka .\scanner.py --onefile --mingw64
+python -m nuitka .\scanner.py --onefile --mingw64 --include-data-dir="negatives=negatives" --include-data-file="utils.py=utils.py" --include-data-file="README.md=README.md" --include-data-file="LICENSE=LICENSE"
 ```
