@@ -36,10 +36,10 @@ pip install -r requirements.txt
 
 ```powershell
 python -m nuitka .\scanner.py `
---onefile `
---mingw64 `
---include-data-dir="negatives=negatives" `
---include-data-file="utils.py=utils.py" `
---include-data-file="README.md=README.md" `
---include-data-file="LICENSE=LICENSE"
+  --onefile `
+  --mingw64 `
+  --include-data-dir="negatives=negatives" `
+  --include-data-file="utils.py=utils.py" `
+  --include-data-file="README.md=README.md" `
+  --include-data-file="LICENSE=LICENSE"
 ```
