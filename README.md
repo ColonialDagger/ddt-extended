@@ -7,12 +7,10 @@ Inspired by [A2TC-YT/Destiny-Damage-Tracker](https://github.com/A2TC-YT/Destiny-
 ## Platforms Supported
 * Windows 11
 
-## Usage
-0. If you do not have `git` installed, install `git`.
+## Dependencies
+* Python 3.12
 
-```powershell
-winget install Git.Git
-```
+## Usage
 
 1. Clone the repository.
 
@@ -20,16 +18,20 @@ winget install Git.Git
 git clone https://github.com/ColonialDagger/ddt-extended.git
 ```
 
-2. Navigate to the directory where ddt-extended was created.
+2. Create a virtual environment.
 
 ```powershell
-cd ddt-extended
+py -3.12 -m venv .venv
 ```
 
-3. Start the program.
+3. Activate the virtual environment.
 
 ```powershell
-.venv\Scripts\python.exe scanner.py
+.\.venv\Scripts\activate
 ```
 
-4. Use `CTRL+C` to exit.
+4. Build the program.
+
+```powershell
+python -m nuitka .\scanner.py --onefile --mingw64
+```
