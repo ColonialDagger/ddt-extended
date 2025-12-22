@@ -49,10 +49,10 @@ class Scanner:
         """
 
         # Get resolution from Destiny 2 window
-        # try:
-        w, h = self._detect_window_resolution(window_name=window_name, timeout=5.0)
-        # except TimeoutError:
-        #     raise TimeoutError("Failed to detect Destiny 2 window resolution (timeout)")
+        try:
+            w, h = self._detect_window_resolution(window_name=window_name, timeout=5.0)
+        except TimeoutError:
+            raise TimeoutError("Failed to detect Destiny 2 window resolution (timeout)")
 
         self.health = 0  # Measured boss health
         self.delta_t = 1  # Time from frame capture to end of processing
@@ -75,8 +75,13 @@ class Scanner:
 
         # Image capture related vars
         self._stop_requested = False  # Flag used to request the capture loop stop from other threads
-
-        self.window_name = window_name
+        self._capture = WindowsCapture(
+            cursor_capture=False,
+            draw_border=False,
+            monitor_index=None,
+            window_name=window_name,
+        )
+        self._capture_thread = threading.Thread(target=self._capture.start, daemon=True)
 
     def start_capture(self) -> None:
         """
@@ -88,13 +93,6 @@ class Scanner:
 
         :return: None
         """
-
-        self._capture = WindowsCapture(
-            cursor_capture=False,
-            draw_border=False,
-            monitor_index=None,
-            window_name=self.window_name,
-        )
 
         # called every time a new frame is available
         @self._capture.event
@@ -112,37 +110,8 @@ class Scanner:
             # Keep a reference to the capture control so stop_capture() can call it
             self._capture_control = capture_control
 
-            # Benchmarking data
-            t_start = time.time()
-
-            # Crop to healthbar region, drop alpha
-            y1, y2, x1, x2 = self.y1, self.y2, self.x1, self.x2
-            cropped = frame.frame_buffer[y1:y2, x1:x2, :-1]
-
-            raw_health = self._estimate_health_optimized(
-                cropped_img=cropped,
-                neg_mask=self.neg_mask,
-                dark=self.dark,
-                light=self.light,
-                min_col_fraction=0.60,  # TODO Try reducing this and see what happens. Consider Golden Gun, etc.
-                edge_width=1
-            )
-
-            # Keeps buffer at the specified size and reports minimum health in order to avoid artifacts like
-            # Well or Golden Gun creating bad data. Health can only ever go down, so the minimum value in the buffer
-            # is reported to ensure instant measurements for data while avoiding showing inflated data points.
-            # Size is determined by health_buffer_size, which is a frame count.
-            self.health_buffer.append(raw_health)
-            if len(self.health_buffer) > self.health_buffer_size:
-                self.health_buffer.pop(0)
-            self.health = min(self.health_buffer)
-
-            # Get brightest and darkest pixels over a runtime. Used to get color references for lookup table.
-            if self.get_colors:
-                self._get_darkest_and_brightest_pixels(cropped, neg_mask=self.neg_mask)
-
-            # Benchmarking data
-            self.delta_t = time.time() - t_start
+            # Run capture processes
+            self._on_capture(frame)
 
             # Stop capture when requested
             if self._stop_requested:
@@ -156,11 +125,12 @@ class Scanner:
 
             :return: None
             """
-            print(f"{self.window_name} has been closed")
+            print("Window has been closed")
 
         # Start capture in a separate thread so start_capture() returns immediately.
         # WindowsCapture.start() runs the capture loop internally; run it on a thread.
         self._stop_requested = False
+        self._capture_thread.start()
 
     def stop_capture(self) -> None:
         """
@@ -194,6 +164,46 @@ class Scanner:
         self._capture = None
         self._capture_control = None
         self._stop_requested = False
+
+    def _on_capture(self, frame: Frame) -> None:
+        """
+        Called when a capture occurs.
+
+        :param frame: windows_capture.Frame
+            The Frame object of the last captured frame.
+        :return: None
+        """
+        # Benchmarking data
+        t_start = time.time()
+
+        # Crop to healthbar region, drop alpha
+        y1, y2, x1, x2 = self.y1, self.y2, self.x1, self.x2
+        cropped = frame.frame_buffer[y1:y2, x1:x2, :-1]
+
+        raw_health = self._estimate_health_optimized(
+            cropped_img=cropped,
+            neg_mask=self.neg_mask,
+            dark=self.dark,
+            light=self.light,
+            min_col_fraction=0.60,  # TODO Try reducing this and see what happens. Consider Golden Gun, etc.
+            edge_width=1
+        )
+
+        # Keeps buffer at the specified size and reports minimum health in order to avoid artifacts like
+        # Well or Golden Gun creating bad data. Health can only ever go down, so the minimum value in the buffer
+        # is reported to ensure instant measurements for data while avoiding showing inflated data points.
+        # Size is determined by health_buffer_size, which is a frame count.
+        self.health_buffer.append(raw_health)
+        if len(self.health_buffer) > self.health_buffer_size:
+            self.health_buffer.pop(0)
+        self.health = min(self.health_buffer)
+
+        # Get brightest and darkest pixels over a runtime. Used to get color references for lookup table.
+        if self.get_colors:
+            self._get_darkest_and_brightest_pixels(cropped, neg_mask=self.neg_mask)
+
+        # Benchmarking data
+        self.delta_t = time.time() - t_start
 
     def get_health(self) -> float:
         """
