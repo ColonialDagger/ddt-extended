@@ -35,3 +35,7 @@ py -3.12 -m venv .venv
 ```powershell
 python -m nuitka .\scanner.py --onefile --mingw64 --include-data-dir="negatives=negatives" --include-data-file="utils.py=utils.py" --include-data-file="README.md=README.md" --include-data-file="LICENSE=LICENSE"
 ```
+
+## Known Issues
+* Large spillover (caused by flooring @ SE Witness) causes bad readings.
+* Brightness 7 not working properly.
