@@ -11,21 +11,45 @@ from windows_capture import WindowsCapture, Frame, InternalCaptureControl
 class Scanner:
 
     # Pixel color references based on brightness (gamma_control) level
-    COLOR_REFERENCES = {
-        1: ((3, 50, 97),
-            (48, 133, 231)),
-        2: ((5, 62, 110),
-            (60, 145, 234)),
-        3: ((9, 76, 125),
-            (74, 158, 237)),
-        4: ((13, 88, 136),
-            (86, 167, 239)),
-        5: ((17, 97, 144),
-            (95, 173, 240)),
-        6: ((21, 105, 151),
-            (103, 179, 242)),
-        7: ((25, 111, 157),
-            (109, 183, 242)),
+    COLOR_REFERENCE = {
+        4: {
+            "rg": {
+                "m_1": 7.5,
+                "b_1": 0,
+                "m_2": 1.2,
+                "b_2": 117,
+                "m_3": 0,
+                "b_3": 170,
+                "m_4": 0.7,
+                "b_4": 65,
+                "m_5": 1.5,
+                "b_5": 20
+            },
+            "gb": {
+                "m_1": 4.5,
+                "b_1": -220,
+                "m_2": 1.3,
+                "b_2": 50,
+                "m_3": 0,
+                "b_3": 242,
+                "m_4": 0.9,
+                "b_4": 45,
+                "m_5": 3,
+                "b_5": -285
+            },
+            "rb": {
+                "m_1": 10.5,
+                "b_1": 25,
+                "m_2": 0.7,
+                "b_2": 215,
+                "m_3": -0.8,
+                "b_3": 285,
+                "m_4": 1.4,
+                "b_4": 65,
+                "m_5": 0.7,
+                "b_5": 110
+            }
+        }
     }
 
     def __init__(
@@ -66,8 +90,7 @@ class Scanner:
         self.get_colors = get_colors
         self.darkest = (255, 255, 255)  # Used to get extreme pixel values on the health bar
         self.brightest = (0, 0, 0)
-        self.dark = self.COLOR_REFERENCES[brightness][0]  # Used for actual health estimation
-        self.light = self.COLOR_REFERENCES[brightness][1]
+        self.color_reference = self.COLOR_REFERENCE[brightness]
 
         # Define mask for pixel capture
         negative = cv2.imread(f"negatives/{self.resolution[0]}x{self.resolution[1]}_negative.png")
@@ -130,6 +153,7 @@ class Scanner:
                 raw_health = self._estimate_health(
                     cropped_img=cropped,
                     neg_mask=self.neg_mask,
+                    color_reference=self.color_reference,
                     min_col_fraction=0.60,  # TODO Try reducing this and see what happens. Consider Golden Gun, etc.
                     edge_width=1
                 )
@@ -358,6 +382,7 @@ class Scanner:
     def _estimate_health(
             cropped_img : np.ndarray,
             neg_mask : np.ndarray,
+            color_reference : dict,
             min_col_fraction : float = 0.60,
             edge_width : int =2
     ) -> float:
@@ -398,68 +423,33 @@ class Scanner:
         g = cropped_img[..., 1].astype(np.float32)
         b = cropped_img[..., 2].astype(np.float32)
 
-        ref = {  # TODO: Set this as a class variable, and create settings for all brightness settings
-            "rg": {
-                "m_1": 7.5,
-                "b_1": 0,
-                "m_2": 1.2,
-                "b_2": 117,
-                "m_3": 0,
-                "b_3": 170,
-                "m_4": 0.7,
-                "b_4": 65,
-                "m_5": 1.5,
-                "b_5": 20
-            },
-            "gb": {
-                "m_1": 4.5,
-                "b_1": -220,
-                "m_2": 1.3,
-                "b_2": 50,
-                "m_3": 0,
-                "b_3": 242,
-                "m_4": 0.9,
-                "b_4": 45,
-                "m_5": 3,
-                "b_5": -285
-            },
-            "rb": {
-                "m_1": 10.5,
-                "b_1": 25,
-                "m_2": 0.7,
-                "b_2": 215,
-                "m_3": -0.8,
-                "b_3": 285,
-                "m_4": 1.4,
-                "b_4": 65,
-                "m_5": 0.7,
-                "b_5": 110
-            }
-        }
-
         # Color1/Color2 scatterplot checks
+        # All equations are linear (y=mx+b)
+        # x is the first color, y is the second color, i.e. rg maps directly to xy where r is x and g is y.
+        # Parameters are denoted by m_n or b_n for slope and y-intercept respectively, where n is the equation number
+        # All masks have three lower bounds (eq. 1-3) and two upper bounds (eq. 4-5)
         rg_mask = (
-            (g < ref["rg"]["m_1"] * r + ref["rg"]["b_1"]) &  # linear  y = mx+b
-            (g < ref["rg"]["m_2"] * r + ref["rg"]["b_2"]) &  # linear  y = mx+b
-            (g < ref["rg"]["m_3"] * r + ref["rg"]["b_3"]) &  # linear  y = mx+b
-            (g > ref["rg"]["m_4"] * r + ref["rg"]["b_4"]) &  # linear  y = mx+b
-            (g > ref["rg"]["m_5"] * r + ref["rg"]["b_5"])  # linear  y = mx+b
+            (g < color_reference["rg"]["m_1"] * r + color_reference["rg"]["b_1"]) &  # linear  y = mx+b
+            (g < color_reference["rg"]["m_2"] * r + color_reference["rg"]["b_2"]) &  # linear  y = mx+b
+            (g < color_reference["rg"]["m_3"] * r + color_reference["rg"]["b_3"]) &  # linear  y = mx+b
+            (g > color_reference["rg"]["m_4"] * r + color_reference["rg"]["b_4"]) &  # linear  y = mx+b
+            (g > color_reference["rg"]["m_5"] * r + color_reference["rg"]["b_5"])  # linear  y = mx+b
         )
 
         gb_mask = (
-            (b < ref["gb"]["m_1"] * g + ref["gb"]["b_1"]) &  # linear  y = mx+b
-            (b < ref["gb"]["m_2"] * g + ref["gb"]["b_2"]) &  # linear  y = mx+b
-            (b < ref["gb"]["m_3"] * g + ref["gb"]["b_3"]) &  # linear  y = mx+b
-            (b > ref["gb"]["m_4"] * g + ref["gb"]["b_4"]) &  # linear  y = mx+b
-            (b > ref["gb"]["m_5"] * g + ref["gb"]["b_5"])  # linear  y = mx+b
+            (b < color_reference["gb"]["m_1"] * g + color_reference["gb"]["b_1"]) &  # linear  y = mx+b
+            (b < color_reference["gb"]["m_2"] * g + color_reference["gb"]["b_2"]) &  # linear  y = mx+b
+            (b < color_reference["gb"]["m_3"] * g + color_reference["gb"]["b_3"]) &  # linear  y = mx+b
+            (b > color_reference["gb"]["m_4"] * g + color_reference["gb"]["b_4"]) &  # linear  y = mx+b
+            (b > color_reference["gb"]["m_5"] * g + color_reference["gb"]["b_5"])  # linear  y = mx+b
         )
 
         rb_mask = (
-            (b < ref["rb"]["m_1"] * r + ref["rb"]["b_1"]) &  # linear  y = mx+b
-            (b < ref["rb"]["m_2"] * r + ref["rb"]["b_2"]) &  # linear  y = mx+b
-            (b < ref["rb"]["m_3"] * r + ref["rb"]["b_3"]) &  # linear  y = mx+b
-            (b > ref["rb"]["m_4"] * r + ref["rb"]["b_4"]) &  # linear  y = mx+b
-            (b > ref["rb"]["m_5"] * r + ref["rb"]["b_5"])  # linear  y = mx+b
+            (b < color_reference["rb"]["m_1"] * r + color_reference["rb"]["b_1"]) &  # linear  y = mx+b
+            (b < color_reference["rb"]["m_2"] * r + color_reference["rb"]["b_2"]) &  # linear  y = mx+b
+            (b < color_reference["rb"]["m_3"] * r + color_reference["rb"]["b_3"]) &  # linear  y = mx+b
+            (b > color_reference["rb"]["m_4"] * r + color_reference["rb"]["b_4"]) &  # linear  y = mx+b
+            (b > color_reference["rb"]["m_5"] * r + color_reference["rb"]["b_5"])  # linear  y = mx+b
         )
 
 
