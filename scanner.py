@@ -608,7 +608,6 @@ def main():
     except KeyboardInterrupt:
         print("Stopping...")
         scanner_instance.stop_capture()
-        input("Press any key to exit...")
         exit(0)
 
 if __name__ == "__main__":
