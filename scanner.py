@@ -368,7 +368,6 @@ class Scanner:
     ) -> float:
         """
         Hybrid health estimation for D2 boss health bars (right -> left scan).
-        Optimized version of Scanner.estimate_health_hybrid.
 
         Core idea:
 
