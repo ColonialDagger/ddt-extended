@@ -743,7 +743,7 @@ class Scanner:
 def main():
 
     # Start capture (scanner thread)
-    scanner_instance = Scanner(brightness=1, get_colors=True)
+    scanner_instance = Scanner(brightness=4, get_colors=True)
 
     # Print the most recent frame data until user exits
     try:
