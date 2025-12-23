@@ -38,7 +38,7 @@ pip install -r requirements.txt
 python -m nuitka .\scanner.py `
   --onefile `
   --mingw64 `
-  --enable-plugin=numpy
+  --enable-plugin=numpy `
   --include-data-dir="negatives=negatives" `
   --include-data-file="utils.py=utils.py" `
   --include-data-file="README.md=README.md" `
