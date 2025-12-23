@@ -187,24 +187,7 @@ class Scanner:
         # sure it's safe to call from another thread.
         self._stop_requested = True
 
-        # If we already have a capture_control reference and we know it's thread-safe to call,
-        # attempt to stop immediately. Otherwise, the capture thread will stop on next frame.
-
-        if getattr(self, "_capture_control", None):
-            try:
-                self.capture_control.stop()
-            except Exception:
-                # ignore: the capture thread will stop when it next checks the flag
-                pass
-
-        # Wait for the capture thread to finish (short timeout so caller isn't blocked too long).
-        if getattr(self, "_capture_thread", None):
-            self._capture_thread.join(timeout=5)
-
-        # Clear internal references
-        self._capture_thread = None
-        self._capture = None
-        self._capture_control = None
+        # Clear internal reference
         self._stop_requested = False
 
     def get_health(self) -> float:
