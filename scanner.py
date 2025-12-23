@@ -187,9 +187,6 @@ class Scanner:
         # sure it's safe to call from another thread.
         self._stop_requested = True
 
-        # Clear internal reference
-        self._stop_requested = False
-
     def get_health(self) -> float:
         """
         Returns the last measured health value.
