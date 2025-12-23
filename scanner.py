@@ -227,6 +227,40 @@ class Scanner:
         except ZeroDivisionError:
             return 9999
 
+    def _detect_window_resolution(self, timeout: float = 5.0) -> None:
+        timeout = time.time() + timeout
+        self._searching = True
+        while self._searching:
+            try:
+                # Every Error From on_closed and on_frame_arrived Will End Up Here
+                capture = WindowsCapture(
+                    cursor_capture=False,
+                    draw_border=False,
+                    monitor_index=None,
+                    window_name=self.window_name,
+                )
+
+                # Called Every Time A New Frame Is Available
+                @capture.event
+                def on_frame_arrived(frame: Frame, capture_control: InternalCaptureControl):
+                    h, w = frame.frame_buffer.shape[:2]
+                    self.resolution = (w, h)
+                    self._searching = False
+                    capture_control.stop()
+
+                # Called When The Capture Item Closes Usually When The Window Closes, Capture
+                # Session Will End After This Function Ends
+                @capture.event
+                def on_closed():
+                    raise RuntimeError("Wimdow closed while determining resolution")
+
+                capture.start()
+            except:  # Always pass, true limiter is the timeout
+                if time.time() > timeout:
+                    raise TimeoutError("Timed out while determining window resolution")
+
+        del self._searching  # Deletes var to avoid polluting outer scope
+
     def _get_darkest_and_brightest_pixels(self, cropped_img, neg_mask=None):
         """
         Returns the darkest and brightest RGB pixels in the healthbar region
@@ -275,40 +309,6 @@ class Scanner:
             )
 
         return self.darkest, self.brightest
-
-    def _detect_window_resolution(self, timeout: float = 5.0) -> None:
-        timeout = time.time() + timeout
-        self._searching = True
-        while self._searching:
-            try:
-                # Every Error From on_closed and on_frame_arrived Will End Up Here
-                capture = WindowsCapture(
-                    cursor_capture=False,
-                    draw_border=False,
-                    monitor_index=None,
-                    window_name=self.window_name,
-                )
-
-                # Called Every Time A New Frame Is Available
-                @capture.event
-                def on_frame_arrived(frame: Frame, capture_control: InternalCaptureControl):
-                    h, w = frame.frame_buffer.shape[:2]
-                    self.resolution = (w, h)
-                    self._searching = False
-                    capture_control.stop()
-
-                # Called When The Capture Item Closes Usually When The Window Closes, Capture
-                # Session Will End After This Function Ends
-                @capture.event
-                def on_closed():
-                    raise RuntimeError("Wimdow closed while determining resolution")
-
-                capture.start()
-            except:  # Always pass, true limiter is the timeout
-                if time.time() > timeout:
-                    raise TimeoutError("Timed out while determining window resolution")
-
-        del self._searching  # Deletes var to avoid polluting outer scope
 
     @staticmethod
     def _grab_neg_mask(negative, health_y1:int, health_y2:int, health_x1:int, health_x2:int):
@@ -365,7 +365,7 @@ class Scanner:
             neg_mask : np.ndarray,
             dark : tuple,
             light : tuple,
-            min_col_fraction : float =0.60,
+            min_col_fraction : float = 0.60,
             edge_width : int =2
     ) -> float:
         """
@@ -477,7 +477,7 @@ class Scanner:
             neg_mask : np.ndarray,
             dark : tuple,
             light : tuple,
-            min_col_fraction : float =0.60,
+            min_col_fraction : float = 0.60,
             edge_width : int =2
     ) -> float:
         """
