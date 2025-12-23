@@ -378,7 +378,7 @@ class Scanner:
         return top, bottom, left, right
 
     @staticmethod
-    def _estimate_health_optimized(
+    def _estimate_health(
             cropped_img : np.ndarray,
             neg_mask : np.ndarray,
             dark : tuple,
