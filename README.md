@@ -42,7 +42,8 @@ python -m nuitka .\scanner.py `
   --include-data-dir="negatives=negatives" `
   --include-data-file="utils.py=utils.py" `
   --include-data-file="README.md=README.md" `
-  --include-data-file="LICENSE=LICENSE"
+  --include-data-file="LICENSE=LICENSE" `
+  --output-dir="builds/onefile"
 ```
 
 ## Known Issues
