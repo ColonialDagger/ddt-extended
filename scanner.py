@@ -11,6 +11,8 @@ from windows_capture import WindowsCapture, Frame, InternalCaptureControl
 class Scanner:
 
     # Pixel color references based on brightness (gamma_control) level
+    # Determined by generating a scatterplot of known healthy pixel values and using linear equations
+    # to create a volume in which pixels are considered to be healthy.
     COLOR_REFERENCE = {
         1: {
             "rg": {
@@ -741,7 +743,7 @@ class Scanner:
 def main():
 
     # Start capture (scanner thread)
-    scanner_instance = Scanner(brightness=4, get_colors=True)
+    scanner_instance = Scanner(brightness=1, get_colors=True)
 
     # Print the most recent frame data until user exits
     try:
