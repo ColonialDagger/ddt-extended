@@ -38,6 +38,7 @@ pip install -r requirements.txt
 python -m nuitka .\scanner.py `
   --onefile `
   --mingw64 `
+  --enable-plugin=numpy `
   --include-data-dir="negatives=negatives" `
   --include-data-file="utils.py=utils.py" `
   --include-data-file="README.md=README.md" `
@@ -45,5 +46,5 @@ python -m nuitka .\scanner.py `
 ```
 
 ## Known Issues
-* Large spillover (caused by flooring @ SE Witness) causes bad readings.
-* Brightness 7 not working properly.
+* Only brightness 4 works.
+* Delta_T sometimes reports 0.0ms.
