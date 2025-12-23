@@ -141,12 +141,12 @@ class Scanner:
                 self.health_buffer.pop(0)
             self.health = min(self.health_buffer)
 
+            # Benchmarking data
+            self.delta_t = time.time() - t_start
+
             # Get brightest and darkest pixels over a runtime. Used to get color references for lookup table.
             if self.get_colors:
                 self._get_darkest_and_brightest_pixels(cropped, neg_mask=self.neg_mask)
-
-            # Benchmarking data
-            self.delta_t = time.time() - t_start
 
             # Stop capture when requested
             if self._stop_requested:
