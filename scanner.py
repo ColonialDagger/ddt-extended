@@ -1,3 +1,5 @@
+import csv
+
 import cv2
 import sys
 import time
@@ -33,6 +35,7 @@ class Scanner:
             health_buffer_size : int = 10,
             window_name : str = "Destiny 2",
             get_colors : bool = False,
+            pixel_output : str = None,
     ) -> None:
         """
         Initializes the scan object.
@@ -50,6 +53,9 @@ class Scanner:
 
 
         self.window_name = window_name
+
+        if pixel_output:
+            self.pixel_output = pixel_output
 
         # Get resolution from Destiny 2 window
         # w, h = self._detect_window_resolution(window_name=window_name, timeout=5.0)
@@ -147,6 +153,10 @@ class Scanner:
             # Get brightest and darkest pixels over a runtime. Used to get color references for lookup table.
             if self.get_colors:
                 self._get_darkest_and_brightest_pixels(cropped, neg_mask=self.neg_mask)
+
+            # Sends pixel data to a CSV file. Used to determine color data
+            if self.pixel_output:
+                self._pixels_to_csv(self.pixel_output, cropped)
 
             # Stop capture when requested
             if self._stop_requested:
@@ -309,6 +319,14 @@ class Scanner:
             )
 
         return self.darkest, self.brightest
+
+    @staticmethod
+    def _pixels_to_csv(path, pixels) -> None:
+        pixels = pixels.reshape(-1, 3)
+        with open(path, "a", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerows(p.tolist() for p in pixels)
+        print("Data saved to csv.")
 
     @staticmethod
     def _grab_neg_mask(negative, health_y1:int, health_y2:int, health_x1:int, health_x2:int):
@@ -587,7 +605,7 @@ def main():
 
     # Start capture (scanner thread)
     try:
-        scanner_instance = Scanner(brightness=4, get_colors=True)
+        scanner_instance = Scanner(brightness=4, get_colors=True, pixel_output="pixels.csv")
     except RuntimeError:
         print("The window is not open!")
         exit(1)
@@ -597,13 +615,14 @@ def main():
         scanner_thread = threading.Thread(target=scanner_instance.start_capture, daemon=True)
         scanner_thread.start()
         while True:
-            print(
-                f"Health: {scanner_instance.get_health():9.6f}% | "
-                f"FPS: {scanner_instance.get_fps():7.2f} | "
-                f"Delta_T: {scanner_instance.get_delta_t()/1000:8.3} ms | "
-                f"Darkest: {scanner_instance.darkest} | "
-                f"Brightest: {scanner_instance.brightest}"
-            )
+            # print(
+            #     f"Health: {scanner_instance.get_health():9.6f}% | "
+            #     f"FPS: {scanner_instance.get_fps():7.2f} | "
+            #     f"Delta_T: {scanner_instance.get_delta_t()/1000:8.3} ms | "
+            #     f"Darkest: {scanner_instance.darkest} | "
+            #     f"Brightest: {scanner_instance.brightest}"
+            # )
+            pass
 
     except KeyboardInterrupt:
         print("Stopping...")
