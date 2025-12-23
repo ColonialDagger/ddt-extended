@@ -46,5 +46,5 @@ python -m nuitka .\scanner.py `
 ```
 
 ## Known Issues
-* Large spillover (caused by flooring @ SE Witness) causes bad readings.
-* Brightness 7 not working properly.
+* Only brightness 4 works.
+* Delta_T sometimes reports 0.0ms.
