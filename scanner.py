@@ -225,7 +225,7 @@ class Scanner:
         try:
             return 1 / self.delta_t
         except ZeroDivisionError:
-            return sys.float_info.max
+            return 9999
 
     def _get_darkest_and_brightest_pixels(self, cropped_img, neg_mask=None):
         """
