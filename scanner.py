@@ -1,5 +1,4 @@
 import csv
-
 import cv2
 import sys
 import time
@@ -131,8 +130,6 @@ class Scanner:
                 raw_health = self._estimate_health(
                     cropped_img=cropped,
                     neg_mask=self.neg_mask,
-                    dark=self.dark,
-                    light=self.light,
                     min_col_fraction=0.60,  # TODO Try reducing this and see what happens. Consider Golden Gun, etc.
                     edge_width=1
                 )
@@ -361,8 +358,6 @@ class Scanner:
     def _estimate_health(
             cropped_img : np.ndarray,
             neg_mask : np.ndarray,
-            dark : tuple,
-            light : tuple,
             min_col_fraction : float = 0.60,
             edge_width : int =2
     ) -> float:
@@ -399,19 +394,76 @@ class Scanner:
         h, w, _ = cropped_img.shape
 
         # Step 0: Fast per-pixel color match (fused, minimal temporaries)
-        r = cropped_img[..., 0]
-        g = cropped_img[..., 1]
-        b = cropped_img[..., 2]
+        r = cropped_img[..., 0].astype(np.float32)
+        g = cropped_img[..., 1].astype(np.float32)
+        b = cropped_img[..., 2].astype(np.float32)
 
-        dr, dg, db = dark
-        lr, lg, lb = light
+        ref = {  # TODO: Set this as a class variable, and create settings for all brightness settings
+            "rg": {
+                "m_1": 7.5,
+                "b_1": 0,
+                "m_2": 1.2,
+                "b_2": 117,
+                "m_3": 0,
+                "b_3": 170,
+                "m_4": 0.7,
+                "b_4": 65,
+                "m_5": 1.5,
+                "b_5": 20
+            },
+            "gb": {
+                "m_1": 4.5,
+                "b_1": -220,
+                "m_2": 1.3,
+                "b_2": 50,
+                "m_3": 0,
+                "b_3": 242,
+                "m_4": 0.9,
+                "b_4": 45,
+                "m_5": 3,
+                "b_5": -285
+            },
+            "rb": {
+                "m_1": 10.5,
+                "b_1": 25,
+                "m_2": 0.7,
+                "b_2": 215,
+                "m_3": -0.8,
+                "b_3": 285,
+                "m_4": 1.4,
+                "b_4": 65,
+                "m_5": 0.7,
+                "b_5": 110
+            }
+        }
 
-        # Fuse comparisons to reduce temporary arrays
-        in_range = (
-                (r >= dr) & (r <= lr) &
-                (g >= dg) & (g <= lg) &
-                (b >= db) & (b <= lb)
+        # Color1/Color2 scatterplot checks
+        rg_mask = (
+            (g < ref["rg"]["m_1"] * r + ref["rg"]["b_1"]) &  # linear  y = mx+b
+            (g < ref["rg"]["m_2"] * r + ref["rg"]["b_2"]) &  # linear  y = mx+b
+            (g < ref["rg"]["m_3"] * r + ref["rg"]["b_3"]) &  # linear  y = mx+b
+            (g > ref["rg"]["m_4"] * r + ref["rg"]["b_4"]) &  # linear  y = mx+b
+            (g > ref["rg"]["m_5"] * r + ref["rg"]["b_5"])  # linear  y = mx+b
         )
+
+        gb_mask = (
+            (b < ref["gb"]["m_1"] * g + ref["gb"]["b_1"]) &  # linear  y = mx+b
+            (b < ref["gb"]["m_2"] * g + ref["gb"]["b_2"]) &  # linear  y = mx+b
+            (b < ref["gb"]["m_3"] * g + ref["gb"]["b_3"]) &  # linear  y = mx+b
+            (b > ref["gb"]["m_4"] * g + ref["gb"]["b_4"]) &  # linear  y = mx+b
+            (b > ref["gb"]["m_5"] * g + ref["gb"]["b_5"])  # linear  y = mx+b
+        )
+
+        rb_mask = (
+            (b < ref["rb"]["m_1"] * r + ref["rb"]["b_1"]) &  # linear  y = mx+b
+            (b < ref["rb"]["m_2"] * r + ref["rb"]["b_2"]) &  # linear  y = mx+b
+            (b < ref["rb"]["m_3"] * r + ref["rb"]["b_3"]) &  # linear  y = mx+b
+            (b > ref["rb"]["m_4"] * r + ref["rb"]["b_4"]) &  # linear  y = mx+b
+            (b > ref["rb"]["m_5"] * r + ref["rb"]["b_5"])  # linear  y = mx+b
+        )
+
+
+        in_range = rg_mask & gb_mask & rb_mask
 
         # Healthy = in-range AND inside mask
         healthy_mask = np.bitwise_and(in_range, neg_mask)
