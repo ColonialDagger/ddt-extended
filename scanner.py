@@ -304,21 +304,19 @@ class Scanner:
         :return: Scanner
         """
 
-
         self.window_name = window_name
-
+        self.t_last = time.time()
         self.pixel_output = pixel_output if pixel_output else None
 
         # Get resolution from Destiny 2 window
-        # w, h = self._detect_window_resolution(window_name=window_name, timeout=5.0)
         self._detect_window_resolution()
 
-        self.health = 0  # Measured boss health
+        self.health = 0  # Measured boss health (0–1)
         self.delta_t = 1  # Time from frame capture to end of processing
 
         # Brightness related vars
         self.get_colors = get_colors
-        self.darkest = (255, 255, 255)  # Used to get extreme pixel values on the health bar
+        self.darkest = (255, 255, 255)
         self.brightest = (0, 0, 0)
         self.color_reference = self.COLOR_REFERENCE[brightness]
 
@@ -331,11 +329,24 @@ class Scanner:
         self.health_buffer = []
         self.health_buffer_size = health_buffer_size
 
-        # Image capture related vars
+        # Capture control flag
         self._stop_requested = False  # Flag used to request the capture loop stop from other threads
 
+        # Phase tracking state
+        self._last_health_fraction = None  # last health value in 0–1
+        self.phase_active = False
+        self.phase_start_time = None  # wall-clock time
+        self.phase_start_health = None  # health (0–1) at phase start
+        self.phase_last_damage_time = None
+        self.phase_time_history = []  # elapsed seconds since phase start
+        self.phase_dps_history = []  # DPS = total_damage / elapsed
+
+        # Tunables for phase detection (in health fraction units: 0–1)
+        self.PHASE_MIN_DAMAGE_FRACTION = 0.0005 # ~0.05% health
+        self.PHASE_IDLE_TIMEOUT = 5.0 # seconds without damage -> phase ends
 
     def start_capture(self) -> None:
+
         """
         Starts the capture session using the Windows Graphics Capture API. This is its own threaded process that will
         run until the stop_capture() is called.
@@ -373,14 +384,11 @@ class Scanner:
                 # Keep a reference to the capture control so stop_capture() can call it
                 self._capture_control = capture_control
 
-                # Benchmarking data
-                t_start = time.time()
-
                 # Crop to healthbar region, drop alpha
                 y1, y2, x1, x2 = self.y1, self.y2, self.x1, self.x2
                 cropped = frame.frame_buffer[y1:y2, x1:x2, :-1]
 
-                raw_health = self._estimate_health(
+                raw_health_fraction = self._estimate_health(
                     cropped_img=cropped,
                     neg_mask=self.neg_mask,
                     color_reference=self.color_reference,
@@ -392,13 +400,29 @@ class Scanner:
                 # Well or Golden Gun creating bad data. Health can only ever go down, so the minimum value in the buffer
                 # is reported to ensure instant measurements for data while avoiding showing inflated data points.
                 # Size is determined by health_buffer_size, which is a frame count.
-                self.health_buffer.append(raw_health)
+                self.health_buffer.append(raw_health_fraction)
                 if len(self.health_buffer) > self.health_buffer_size:
                     self.health_buffer.pop(0)
-                self.health = min(self.health_buffer)
+                new_health_fraction = min(self.health_buffer)  # 0–1
 
-                # Benchmarking data
-                self.delta_t = time.time() - t_start
+                # Timing data
+                now = time.time()
+                self.delta_t = now - self.t_last
+                self.t_last = now
+
+                # Phase tracking update
+                prev_fraction = self._last_health_fraction
+                if prev_fraction is None:
+                    prev_fraction = new_health_fraction
+                self._update_phase_state(
+                    now=now,
+                    prev_health=prev_fraction,
+                    current_health=new_health_fraction
+                )
+                self._last_health_fraction = new_health_fraction
+
+                # Publish health for external callers
+                self.health = new_health_fraction
 
                 # Get brightest and darkest pixels over a runtime. Used to get color references for lookup table.
                 if self.get_colors:
@@ -469,6 +493,83 @@ class Scanner:
         except ZeroDivisionError:
             return 9999
 
+    def get_phase_active(self) -> bool:
+        """
+        Returns whether a phase is currently active.
+
+        :return: bool
+            State of phase.
+        """
+        return self.phase_active
+
+    def get_phase_series(self) -> tuple[list[float], list[float]]:
+        """
+        Returns (times, dps) for the current/most recent phase.
+
+        :return: tuple[list[float], list[float]]
+            times: list of elapsed seconds since phase start.
+            dps: list of DPS values at those times.
+        """
+        """
+        Returns (times, dps) for the current/most recent phase.
+        times: list of elapsed seconds since phase start.
+        dps:   list of DPS values at those times.
+        """
+        return list(self.phase_time_history), list(self.phase_dps_history)
+
+    def _update_phase_state(self, now: float, prev_health: float, current_health: float) -> None:
+        """
+        Updates phase state based on health changes.
+
+        :param now: float
+            Current time.
+        :param prev_health:
+            Previous health value.
+        :param current_health:
+            Current health value
+        :return: None
+        """
+        """
+        Runs at capture rate. Health values are fractions (0–1).
+        Detects phase start/end, and updates DPS series.
+        """
+        damage = prev_health - current_health  # positive when boss loses health
+
+        # Ignore tiny noise
+        if abs(damage) < 1e-6:
+            damage = 0.0
+
+        # Phase start
+        if not self.phase_active and damage > self.PHASE_MIN_DAMAGE_FRACTION:
+            self.phase_active = True
+            self.phase_start_time = now
+            self.phase_start_health = prev_health
+            self.phase_last_damage_time = now
+            self.phase_time_history.clear()
+            self.phase_dps_history.clear()
+            return
+
+        # Phase continues
+        if self.phase_active:
+            if damage > self.PHASE_MIN_DAMAGE_FRACTION:
+                self.phase_last_damage_time = now
+
+            # Phase end
+            if self.phase_last_damage_time is not None and (now - self.phase_last_damage_time > self.PHASE_IDLE_TIMEOUT):
+                self.phase_active = False
+                return
+
+            # Update DPS curve
+            if self.phase_start_time is not None and self.phase_start_health is not None:
+                elapsed = now - self.phase_start_time
+                if elapsed > 0:
+                    total_damage = self.phase_start_health - current_health
+                    if total_damage < 0:
+                        total_damage = 0.0
+                    dps = total_damage / elapsed
+                    self.phase_time_history.append(elapsed)
+                    self.phase_dps_history.append(dps)
+
     def _detect_window_resolution(self, timeout: float = 5.0) -> None:
         timeout = time.time() + timeout
         self._searching = True
@@ -494,7 +595,7 @@ class Scanner:
                 # Session Will End After This Function Ends
                 @capture.event
                 def on_closed():
-                    raise RuntimeError("Wimdow closed while determining resolution")
+                    raise RuntimeError("Window closed while determining resolution")
 
                 capture.start()
             except:  # Always pass, true limiter is the timeout
