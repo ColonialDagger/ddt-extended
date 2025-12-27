@@ -87,10 +87,6 @@ def train_gmm(points, n_components=3):
     weights = gmm.weights_
     means = gmm.means_
     covs = gmm.covariances_
-    print("weights =", weights.tolist())
-    print("means =", means.tolist())
-    print("covs =", covs.tolist())
-    print("threshold =", float(threshold))
 
     return gmm, threshold
 
