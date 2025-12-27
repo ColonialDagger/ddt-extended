@@ -1,3 +1,6 @@
+
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.figure import Figure
 import matplotlib.transforms as mtransforms
 import threading
 import time
@@ -96,11 +99,11 @@ class DDT(tb.Window):
         container.pack(fill=BOTH, expand=True)
 
         # Left column
-        left_column = tb.Frame(container)
-        left_column.pack(side=LEFT, fill=BOTH, expand=True)
+        self.left_column = tb.Frame(container)
+        self.left_column.pack(side=LEFT, fill=BOTH, expand=True)
 
         # Stats frame
-        self.left_frame = tb.Labelframe(left_column, text="Scanner Stats", padding=10)
+        self.left_frame = tb.Labelframe(self.left_column, text="Scanner Stats", padding=10)
         self.left_frame.pack(fill=X, padx=10, pady=10)
 
         self.health_var = tb.StringVar(value="—")
@@ -117,20 +120,16 @@ class DDT(tb.Window):
         tb.Label(self.left_frame, textvariable=self.delta_var, width=15).grid(row=2, column=1, sticky=E)
 
         # Graphs container
-        graphs_container = tb.Frame(left_column)
+        graphs_container = tb.Frame(self.left_column)
         graphs_container.pack(fill=BOTH, expand=True, padx=10, pady=(0, 10))
 
         # Left graph: health over time
-        self.graph_frame = tb.Labelframe(graphs_container, text="Boss Health Over Time", padding=0)
+        self.graph_frame = tb.Labelframe(graphs_container, text="Boss Health vs. Time", padding=0)
         self.graph_frame.pack(side=LEFT, fill=BOTH, expand=True, padx=(0, 10))
 
         # Right graph: phase DPS over time
-        self.graph_frame_2 = tb.Labelframe(graphs_container, text="Phase DPS Over Time", padding=0)
+        self.graph_frame_2 = tb.Labelframe(graphs_container, text="d%/dt vs. Time", padding=0)
         self.graph_frame_2.pack(side=LEFT, fill=BOTH, expand=True)
-
-        # Matplotlib setup
-        from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-        from matplotlib.figure import Figure
 
         # Health graph
         self.fig = Figure(figsize=(5, 3), dpi=100)
@@ -172,6 +171,15 @@ class DDT(tb.Window):
         self.health_buffer_var = tb.StringVar(value="10")
         tb.Spinbox(self.settings_frame, from_=1, to=100,
                    textvariable=self.health_buffer_var, width=10).pack(anchor=W, pady=(0, 10))
+
+        # Enforce minimum widths
+        self.update_idletasks()
+
+        self.left_column.pack_propagate(False)
+        self.right_column.pack_propagate(False)
+
+        self.left_column.configure(width=500)  # adjust as needed
+        self.right_column.configure(width=150)  # adjust as needed
 
     # Scanner Control
     def _start_scanner(self):
@@ -342,6 +350,22 @@ class DDT(tb.Window):
         self.ax.clear()
         self._apply_theme_to_graph()
 
+        # Remove all internal whitespace
+        self.ax.margins(0)
+        self.ax.set_xmargin(0)
+        self.ax.set_ymargin(0)
+        self.ax.tick_params(
+            axis='both',
+            which='both',
+            bottom=False,
+            top=False,
+            left=False,
+            right=False,
+            labelbottom=False,
+            labelleft=False
+        )
+        self.fig.subplots_adjust(left=0, right=1, top=1, bottom=0)
+
         self.ax.set_ylim(0, 100)
         self.ax.set_xlim(-60, 0)
 
@@ -421,6 +445,21 @@ class DDT(tb.Window):
         # Draw DPS Graph (right)
         self.ax2.clear()
         self._apply_theme_to_graph()
+
+        self.ax2.margins(0)
+        self.ax2.set_xmargin(0)
+        self.ax2.set_ymargin(0)
+        self.ax2.tick_params(
+            axis='both',
+            which='both',
+            bottom=False,
+            top=False,
+            left=False,
+            right=False,
+            labelbottom=False,
+            labelleft=False
+        )
+        self.fig2.subplots_adjust(left=0, right=1, top=1, bottom=0)
 
         if not dps_values:
             self.ax2.set_xlim(0, 10)
