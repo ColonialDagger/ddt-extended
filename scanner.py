@@ -808,10 +808,6 @@ class Scanner:
             Current health value
         :return: None
         """
-        """
-        Runs at capture rate. Health values are fractions (0–1).
-        Detects phase start/end, and updates DPS series.
-        """
         damage = prev_health - current_health  # positive when boss loses health
 
         # Ignore tiny noise
