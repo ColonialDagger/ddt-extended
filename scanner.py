@@ -282,6 +282,44 @@ class Scanner:
         }
     }
 
+    import numpy as np
+
+    # ============================
+    # GMM PARAMETERS (HARDCODED)
+    # ============================
+
+    GMM_WEIGHTS = np.array([
+        0.34975175562379884,
+        0.31671444592806414,
+        0.3335337984481371
+    ])
+
+    GMM_MEANS = np.array([
+        [33.556663664424406, 135.9145693364635, 213.62876560741853],
+        [61.69462946522615, 141.07796474135043, 192.6307341559729],
+        [38.68581632083097, 110.24083444065437, 167.42702552333836]
+    ])
+
+    GMM_COVS = np.array([
+        [[110.95936808838898, 108.55035422111852, 36.99438211891077],
+         [108.55035422111852, 255.2318447409084, 187.04970243225821],
+         [36.99438211891077, 187.04970243225821, 233.18462611797324]],
+
+        [[176.53146342178883, 83.44726899264356, 2.5266994383271983],
+         [83.44726899264356, 183.60602713766744, 211.49507906356587],
+         [2.526699438327197, 211.4950790635658, 341.8291620825708]],
+
+        [[202.33581379614432, 112.88674256533488, 101.06068168014548],
+         [112.88674256533488, 177.99401517516054, 230.21703017738915],
+         [101.06068168014548, 230.21703017738915, 359.6735032579051]]
+    ])
+
+    GMM_THRESHOLD = -19.255949242118373
+
+    # Precompute inverses and log-dets
+    GMM_INV_COVS = np.linalg.inv(GMM_COVS)
+    GMM_LOG_DETS = np.log(np.linalg.det(GMM_COVS))
+
     def __init__(
             self,
             brightness : int = 4,
@@ -754,40 +792,10 @@ class Scanner:
         g = cropped_img[..., 1].astype(np.float32)
         b = cropped_img[..., 2].astype(np.float32)
 
-        # Color1/Color2 scatterplot checks
-        # All equations are linear (y=mx+b)
-        # x is the first color, y is the second color, i.e. rg maps directly to xy where r is x and g is y.
-        # Parameters are denoted by m_n or b_n for slope and y-intercept respectively, where n is the equation number
-        # All masks have three lower bounds (eq. 1-3) and two upper bounds (eq. 4-5)
-        rg_mask = (
-            (g < color_reference["rg"]["m_1"] * r + color_reference["rg"]["b_1"]) &  # linear  y = mx+b
-            (g < color_reference["rg"]["m_2"] * r + color_reference["rg"]["b_2"]) &  # linear  y = mx+b
-            (g < color_reference["rg"]["m_3"] * r + color_reference["rg"]["b_3"]) &  # linear  y = mx+b
-            (g > color_reference["rg"]["m_4"] * r + color_reference["rg"]["b_4"]) &  # linear  y = mx+b
-            (g > color_reference["rg"]["m_5"] * r + color_reference["rg"]["b_5"])  # linear  y = mx+b
-        )
-
-        gb_mask = (
-            (b < color_reference["gb"]["m_1"] * g + color_reference["gb"]["b_1"]) &  # linear  y = mx+b
-            (b < color_reference["gb"]["m_2"] * g + color_reference["gb"]["b_2"]) &  # linear  y = mx+b
-            (b < color_reference["gb"]["m_3"] * g + color_reference["gb"]["b_3"]) &  # linear  y = mx+b
-            (b > color_reference["gb"]["m_4"] * g + color_reference["gb"]["b_4"]) &  # linear  y = mx+b
-            (b > color_reference["gb"]["m_5"] * g + color_reference["gb"]["b_5"])  # linear  y = mx+b
-        )
-
-        rb_mask = (
-            (b < color_reference["rb"]["m_1"] * r + color_reference["rb"]["b_1"]) &  # linear  y = mx+b
-            (b < color_reference["rb"]["m_2"] * r + color_reference["rb"]["b_2"]) &  # linear  y = mx+b
-            (b < color_reference["rb"]["m_3"] * r + color_reference["rb"]["b_3"]) &  # linear  y = mx+b
-            (b > color_reference["rb"]["m_4"] * r + color_reference["rb"]["b_4"]) &  # linear  y = mx+b
-            (b > color_reference["rb"]["m_5"] * r + color_reference["rb"]["b_5"])  # linear  y = mx+b
-        )
-
-
-        in_range = rg_mask & gb_mask & rb_mask
+        gmm_mask = Scanner._gmm_mask(r, g, b)
 
         # Healthy = in-range AND inside mask
-        healthy_mask = np.bitwise_and(in_range, neg_mask)
+        healthy_mask = np.bitwise_and(gmm_mask, neg_mask)
 
         # Step 1: Vectorized column counts
         mask_counts = np.count_nonzero(neg_mask, axis=0)
@@ -840,6 +848,51 @@ class Scanner:
 
         health_fraction = total_healthy / total_bar_pixels
         return min(1.0, max(0.0, health_fraction))
+
+    @staticmethod
+    def _gmm_mask(r, g, b):
+        """
+        Vectorized GMM classifier for entire image.
+        r, g, b are float32 arrays of shape (H, W)
+        Returns boolean mask of shape (H, W)
+        """
+        x = np.stack([r, g, b], axis=-1)  # (H, W, 3)
+
+        # log-sum-exp accumulator
+        log_prob = np.full(x.shape[:2], -np.inf, dtype=np.float64)
+
+        for w, mu, inv_cov, log_det in zip(
+                Scanner.GMM_WEIGHTS,
+                Scanner.GMM_MEANS,
+                Scanner.GMM_INV_COVS,
+                Scanner.GMM_LOG_DETS
+        ):
+            diff = x - mu  # (H, W, 3)
+
+            # Mahalanobis distance per pixel
+            md = (
+                    diff[..., 0] * (inv_cov[0, 0] * diff[..., 0] +
+                                    inv_cov[0, 1] * diff[..., 1] +
+                                    inv_cov[0, 2] * diff[..., 2]) +
+                    diff[..., 1] * (inv_cov[1, 0] * diff[..., 0] +
+                                    inv_cov[1, 1] * diff[..., 1] +
+                                    inv_cov[1, 2] * diff[..., 2]) +
+                    diff[..., 2] * (inv_cov[2, 0] * diff[..., 0] +
+                                    inv_cov[2, 1] * diff[..., 1] +
+                                    inv_cov[2, 2] * diff[..., 2])
+            )
+
+            lp = (
+                    -0.5 * md
+                    - 0.5 * log_det
+                    - 1.5 * np.log(2 * np.pi)
+                    + np.log(w)
+            )
+
+            log_prob = np.logaddexp(log_prob, lp)
+
+        return log_prob >= Scanner.GMM_THRESHOLD
+
 
 def main():
 
