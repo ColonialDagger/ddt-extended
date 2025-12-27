@@ -227,7 +227,7 @@ class DDT(tb.Window):
                     print("Trying to start scanner...")
                     self._start_scanner()
                     print("Scanner started successfully.")
-                    self.scanner_instance = False
+                    self.scanner_searching = False
                     return
                 except TimeoutError:
                     print("Scanner failed — retrying in 5 seconds...")
