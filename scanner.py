@@ -626,7 +626,6 @@ class Scanner:
         self.PHASE_IDLE_TIMEOUT = 5.0 # seconds without damage -> phase ends
 
     def start_capture(self) -> None:
-
         """
         Starts the capture session using the Windows Graphics Capture API. This is its own threaded process that will
         run until the stop_capture() is called.
