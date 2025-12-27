@@ -7,7 +7,7 @@ Inspired by [A2TC-YT/Destiny-Damage-Tracker](https://github.com/A2TC-YT/Destiny-
 ## Platforms Supported
 * Windows 11
 
-## Dependencies
+## Build Dependencies
 * Python 3.12
 
 ## Building
@@ -33,17 +33,19 @@ pip install -r requirements.txt
 ```
 
 4. Build the program.
-
+   
 ```powershell
-python -m nuitka .\scanner.py `
+python -m nuitka .\gui.py `
   --onefile `
   --mingw64 `
   --enable-plugin=numpy `
+  --enable-plugin=tk-inter `
   --include-data-dir="negatives=negatives" `
   --include-data-file="utils.py=utils.py" `
   --include-data-file="README.md=README.md" `
   --include-data-file="LICENSE=LICENSE" `
-  --output-dir="builds/onefile"
+  --output-dir="builds/w11-onefile" `
+  --windows-console-mode=disable
 ```
 
 ## Known Issues
