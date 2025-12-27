@@ -15,7 +15,7 @@ class DDT(tb.Window):
         super().__init__(*args, **kwargs)
 
         self.title("DDT Extended")
-        self.geometry("1200x500")
+        self.geometry("900x500")
 
         self.scanner_instance = None
         self.scanner_thread = None
@@ -32,8 +32,10 @@ class DDT(tb.Window):
         self._build_main_frames()
         self._apply_theme_to_graph()
 
-        self._update_stats()
-        self._update_graph()
+        # Delay updates until Tk has real widget sizes
+        self.after(0, self._force_initial_canvas_size)
+        self.after(10, self._update_stats)
+        self.after(10, self._update_graph)
 
     def _validate_digits(self, proposed) -> bool:
         """
@@ -45,6 +47,27 @@ class DDT(tb.Window):
             True if the proposed value is valid (only digits or empty), False otherwise
         """
         return proposed == "" or proposed.isdigit()
+
+    def _force_initial_canvas_size(self):
+        # Let Tk compute widget sizes
+        self.update_idletasks()
+
+        # Get actual pixel size of the canvas widgets
+        w1 = self.canvas.get_tk_widget().winfo_width()
+        h1 = self.canvas.get_tk_widget().winfo_height()
+        w2 = self.canvas2.get_tk_widget().winfo_width()
+        h2 = self.canvas2.get_tk_widget().winfo_height()
+
+        # Convert pixels → inches for Matplotlib
+        dpi = self.fig.get_dpi()
+        if w1 > 1 and h1 > 1:
+            self.fig.set_size_inches(w1 / dpi, h1 / dpi)
+        if w2 > 1 and h2 > 1:
+            self.fig2.set_size_inches(w2 / dpi, h2 / dpi)
+
+        # Redraw now that sizes are correct
+        self.canvas.draw()
+        self.canvas2.draw()
 
     def _build_titlebar(self):
         """
@@ -123,21 +146,26 @@ class DDT(tb.Window):
         graphs_container = tb.Frame(self.left_column)
         graphs_container.pack(fill=BOTH, expand=True, padx=10, pady=(0, 10))
 
+        # Use grid instead of pack for perfect equal sizing
+        graphs_container.grid_columnconfigure(0, weight=1)
+        graphs_container.grid_columnconfigure(1, weight=1)
+        graphs_container.grid_rowconfigure(0, weight=1)
+
         # Left graph: health over time
         self.graph_frame = tb.Labelframe(graphs_container, text="Boss Health vs. Time", padding=0)
-        self.graph_frame.pack(side=LEFT, fill=BOTH, expand=True, padx=(0, 10))
+        self.graph_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
 
         # Right graph: phase DPS over time
         self.graph_frame_2 = tb.Labelframe(graphs_container, text="d%/dt vs. Time", padding=0)
-        self.graph_frame_2.pack(side=LEFT, fill=BOTH, expand=True)
+        self.graph_frame_2.grid(row=0, column=1, sticky="nsew")
 
-        # Health graph
+        # Health graph canvas
         self.fig = Figure(figsize=(5, 3), dpi=100)
         self.ax = self.fig.add_subplot(111)
         self.canvas = FigureCanvasTkAgg(self.fig, master=self.graph_frame)
         self.canvas.get_tk_widget().pack(fill=BOTH, expand=True)
 
-        # DPS graph
+        # DPS graph canvas
         self.fig2 = Figure(figsize=(5, 3), dpi=100)
         self.ax2 = self.fig2.add_subplot(111)
         self.canvas2 = FigureCanvasTkAgg(self.fig2, master=self.graph_frame_2)
@@ -180,6 +208,9 @@ class DDT(tb.Window):
 
         self.left_column.configure(width=500)  # adjust as needed
         self.right_column.configure(width=150)  # adjust as needed
+
+        self.after_idle(self.canvas.draw)
+        self.after_idle(self.canvas2.draw)
 
     # Scanner Control
     def _start_scanner(self):
