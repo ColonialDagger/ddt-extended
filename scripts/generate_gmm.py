@@ -5,10 +5,13 @@ import json
 import glob
 import os
 
+# -----------------------------
+# CONFIG
+# -----------------------------
 DATA_FOLDER = "data"
 N_COMPONENTS = 3          # You can increase to 5 or 8 if needed
-KEEP_FRACTION = 0.999     # Keep 99.9% of points (looser threshold)
-COV_TYPE = "full"         # "tied" or "full" are best for RGB
+KEEP_FRACTION = 0.999     # Keep 99.9% of points
+COV_TYPE = "full"         # "full" or "tied" recommended
 
 
 def train_gmm_for_file(csv_path):
@@ -29,12 +32,20 @@ def train_gmm_for_file(csv_path):
     # Extract parameters
     weights = gmm.weights_.tolist()
     means = gmm.means_.tolist()
-    covs = gmm.covariances_.tolist()
+    prec_chol = gmm.precisions_cholesky_.tolist()
+
+    # Compute log-determinants from Cholesky precision
+    log_dets = []
+    for L in gmm.precisions_cholesky_:
+        # log|Σ| = -2 * sum(log(diag(L)))
+        log_det = -2.0 * np.sum(np.log(np.diag(L)))
+        log_dets.append(float(log_det))
 
     return {
         "weights": weights,
         "means": means,
-        "covs": covs,
+        "prec_chol": prec_chol,
+        "log_dets": log_dets,
         "threshold": float(threshold)
     }
 
@@ -48,7 +59,6 @@ def main():
     for f in files:
         # Extract brightness number from filename
         base = os.path.basename(f)
-        # pixels_unique_b3.csv → 3
         brightness = int(base.split("_b")[1].split(".")[0])
 
         print(f"Training brightness {brightness} from {base}...")

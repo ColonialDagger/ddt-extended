@@ -181,6 +181,7 @@ class DDT(tb.Window):
         self.controls_frame = tb.Labelframe(self.right_column, text="Controls", padding=10)
         self.controls_frame.pack(fill=X)
 
+        # TODO Replace these buttons with a "record" button to output data to csv
         # Scanner control buttons
         tb.Button(self.controls_frame, text="Start Scanner", bootstyle=SUCCESS,
                   command=self._start_scanner).pack(fill=X, pady=(0, 5))
@@ -202,6 +203,13 @@ class DDT(tb.Window):
         tb.Spinbox(self.settings_frame, from_=1, to=100,
                    textvariable=self.health_buffer_var, width=10).pack(anchor=W, pady=(0, 10))
 
+        tb.Button(
+            self.settings_frame,
+            text="Apply Settings",
+            bootstyle=PRIMARY,
+            command=self._apply_settings
+        ).pack(fill=X, pady=(20, 0))
+
         # Enforce minimum widths
         self.update_idletasks()
 
@@ -222,9 +230,9 @@ class DDT(tb.Window):
         """
 
         def attempt():
+            print("Trying to start scanner...")
             while True:
                 try:
-                    print("Trying to start scanner...")
                     self._start_scanner()
                     print("Scanner started successfully.")
                     self.scanner_searching = False
@@ -287,6 +295,31 @@ class DDT(tb.Window):
 
         self.scanner_instance = None
         self.scanner_thread = None
+
+    def _apply_settings(self):
+        """
+        Stop the current scanner (if any), reset state, and start a new scanner
+        using the updated settings.
+        """
+        print("Applying new settings...")
+
+        # Stop existing scanner
+        if self.scanner_instance is not None:
+            try:
+                if hasattr(self.scanner_instance, "stop_capture"):
+                    self.scanner_instance.stop_capture()
+                else:
+                    self.scanner_instance.stop()
+            except Exception as e:
+                print("Error stopping scanner during settings apply:", e)
+
+        # Reset scanner state
+        self.scanner_instance = None
+        self.scanner_thread = None
+        self.scanner_searching = True
+
+        # Start a new scanner with updated settings
+        self._auto_start_scanner()
 
     @staticmethod
     def _normalize_health_value(health):
