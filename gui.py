@@ -19,6 +19,7 @@ class DDT(tb.Window):
 
         self.scanner_instance = None
         self.scanner_thread = None
+        self.scanner_searching = True
 
         # Validation
         self.only_digits_vcmd = (self.register(self._validate_digits), "%P")
@@ -36,6 +37,7 @@ class DDT(tb.Window):
         self.after(0, self._force_initial_canvas_size)
         self.after(10, self._update_stats)
         self.after(10, self._update_graph)
+        self.after(200, self._auto_start_scanner)
 
     def _validate_digits(self, proposed) -> bool:
         """
@@ -211,6 +213,30 @@ class DDT(tb.Window):
 
         self.after_idle(self.canvas.draw)
         self.after_idle(self.canvas2.draw)
+
+    def _auto_start_scanner(self) -> None:
+        """
+        Automatically attempt to start the scanner in a separate thread, retrying on failure.
+
+        :return: None
+        """
+
+        def attempt():
+            while True:
+                try:
+                    print("Trying to start scanner...")
+                    self._start_scanner()
+                    print("Scanner started successfully.")
+                    self.scanner_instance = False
+                    return
+                except TimeoutError:
+                    print("Scanner failed — retrying in 5 seconds...")
+                    time.sleep(5)
+                except Exception as e:
+                    print("Unexpected scanner error:", e)
+                    time.sleep(5)
+
+        threading.Thread(target=attempt, daemon=True).start()
 
     # Scanner Control
     def _start_scanner(self):

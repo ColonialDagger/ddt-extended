@@ -570,7 +570,7 @@ class Scanner:
                     self.phase_time_history.append(elapsed)
                     self.phase_dps_history.append(dps)
 
-    def _detect_window_resolution(self, timeout: float = 5.0) -> None:
+    def _detect_window_resolution(self, timeout: float = 0.1) -> None:
         timeout = time.time() + timeout
         self._searching = True
         while self._searching:
