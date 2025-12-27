@@ -8,6 +8,7 @@ import time
 import ttkbootstrap as tb
 from ttkbootstrap.constants import *
 
+import overlay
 import scanner
 
 class Tooltip:
@@ -82,7 +83,6 @@ class Tooltip:
         b = 255 - int(hex_color[4:6], 16)
         return f"#{r:02X}{g:02X}{b:02X}"
 
-
 class DDT(tb.Window):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -111,6 +111,9 @@ class DDT(tb.Window):
         self.after(10, self._update_stats)
         self.after(10, self._update_graph)
         self.after(200, self._auto_start_scanner)
+
+        # Sets the overlay controller
+        self.overlay = overlay.Overlay()
 
     def _validate_digits(self, proposed) -> bool:
         """
@@ -266,6 +269,7 @@ class DDT(tb.Window):
         self.settings_frame = tb.Labelframe(self.right_column, text="Settings", padding=10)
         self.settings_frame.pack(fill=BOTH, expand=True, pady=(15, 0))
 
+        # Brightness box
         tb.Label(self.settings_frame, text="Brightness:").pack(anchor=W)
         self.brightness_var = tb.StringVar(value="4")
         brightness_box = tb.Combobox(self.settings_frame, textvariable=self.brightness_var,
@@ -278,6 +282,7 @@ class DDT(tb.Window):
                 )
             )
 
+        # Health buffer size box
         tb.Label(self.settings_frame, text="Health Buffer Size:").pack(anchor=W)
         self.health_buffer_var = tb.StringVar(value="10")
         buffer_box = tb.Spinbox(self.settings_frame, from_=1, to=100,
@@ -294,6 +299,25 @@ class DDT(tb.Window):
             )
         )
 
+        # Overlay enable checkbox
+        self.overlay_enabled_var = tb.BooleanVar(value=False)
+        overlay_check = tb.Checkbutton(
+            self.settings_frame,
+            text="Enable Overlay",
+            variable=self.overlay_enabled_var,
+            bootstyle="round-toggle",
+            command=self._toggle_overlay
+        )
+        overlay_check.pack(anchor=W, pady=(10, 10))
+        Tooltip(
+            overlay_check,
+            (
+                "Enable or disable the on-screen overlay display.\n\n"
+                "Requires restart of the scanner to take effect."
+            )
+        )
+
+        # Apply settings button
         tb.Button(
             self.settings_frame,
             text="Apply Settings",
@@ -412,6 +436,12 @@ class DDT(tb.Window):
         # Start a new scanner with updated settings
         self._auto_start_scanner()
 
+    def _toggle_overlay(self):
+        if self.overlay_enabled_var.get():
+            self.overlay.start()
+        else:
+            self.overlay.stop()
+
     @staticmethod
     def _normalize_health_value(health):
         """
@@ -437,13 +467,16 @@ class DDT(tb.Window):
             try:
                 health = self._normalize_health_value(self.scanner_instance.get_health())
                 fps = self.scanner_instance.get_fps()
-                delta = self.scanner_instance.get_delta_t()
+                delta = self.scanner_instance.get_delta_t() * 1000  # µs
 
                 self.health_var.set(f"{health:.2f} %")
                 self.fps_var.set(f"{fps:.2f} FPS")
-                self.delta_var.set(f"{delta:.2f} ms")
+                self.delta_var.set(f"{delta:.2f} µs")
             except Exception as e:
                 print("Scanner update error:", e)
+
+            if self.overlay_enabled_var.get() and health is not None:
+                self.overlay.set_health(health)
 
         self.after(100, self._update_stats)
 
