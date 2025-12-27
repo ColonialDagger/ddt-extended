@@ -10,6 +10,79 @@ from ttkbootstrap.constants import *
 
 import scanner
 
+class Tooltip:
+    """
+    Simple tooltip for Tkinter/ttkbootstrap widgets.
+    Appears on hover, disappears on leave.
+    """
+
+    def __init__(self, widget, text, delay=500):
+        self.widget = widget
+        self.text = text
+        self.delay = delay  # ms before showing tooltip
+        self.tip_window = None
+        self.after_id = None
+
+        widget.bind("<Enter>", self._schedule)
+        widget.bind("<Leave>", self._hide)
+        widget.bind("<ButtonPress>", self._hide)
+
+    def _schedule(self, event=None):
+        self._cancel()
+        self.after_id = self.widget.after(self.delay, self._show)
+
+    def _cancel(self):
+        if self.after_id:
+            self.widget.after_cancel(self.after_id)
+            self.after_id = None
+
+    def _show(self):
+        if self.tip_window or not self.text:
+            return
+
+        # Position tooltip
+        x = self.widget.winfo_rootx() + 20
+        y = self.widget.winfo_rooty() + self.widget.winfo_height() + 5
+
+        # Create window
+        self.tip_window = tw = tb.Toplevel(self.widget)
+        tw.wm_overrideredirect(True)
+        tw.wm_geometry(f"+{x}+{y}")
+
+        # Get theme background color
+        bg = self.widget.winfo_toplevel().style.colors.bg
+
+        # Compute inverse text color
+        inv = self._inverse_hex_color(bg)
+
+        label = tb.Label(
+            tw,
+            text=self.text,
+            padding=6,
+            background=bg,
+            foreground=inv,
+            justify="left",
+            wraplength=250
+        )
+        label.pack()
+
+    def _hide(self, event=None):
+        self._cancel()
+        if self.tip_window:
+            self.tip_window.destroy()
+            self.tip_window = None
+
+    @staticmethod
+    def _inverse_hex_color(hex_color: str) -> str:
+        hex_color = hex_color.lstrip("#")
+        if len(hex_color) != 6:
+            return "#FFFFFF"
+        r = 255 - int(hex_color[0:2], 16)
+        g = 255 - int(hex_color[2:4], 16)
+        b = 255 - int(hex_color[4:6], 16)
+        return f"#{r:02X}{g:02X}{b:02X}"
+
+
 class DDT(tb.Window):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -195,13 +268,31 @@ class DDT(tb.Window):
 
         tb.Label(self.settings_frame, text="Brightness:").pack(anchor=W)
         self.brightness_var = tb.StringVar(value="4")
-        tb.Combobox(self.settings_frame, textvariable=self.brightness_var,
-                    values=["1","2","3","4","5","6","7"], width=10).pack(anchor=W, pady=(0, 10))
+        brightness_box = tb.Combobox(self.settings_frame, textvariable=self.brightness_var,
+                    values=["1","2","3","4","5","6","7"], width=10)
+        brightness_box.pack(anchor=W, pady=(0, 10))
+        Tooltip(brightness_box,
+                (
+                    """The brightness setting used in-game.\n\n"""
+                    """This must match your ingame brightness setting for accurate results."""
+                )
+            )
 
         tb.Label(self.settings_frame, text="Health Buffer Size:").pack(anchor=W)
         self.health_buffer_var = tb.StringVar(value="10")
-        tb.Spinbox(self.settings_frame, from_=1, to=100,
-                   textvariable=self.health_buffer_var, width=10).pack(anchor=W, pady=(0, 10))
+        buffer_box = tb.Spinbox(self.settings_frame, from_=1, to=100,
+                   textvariable=self.health_buffer_var, width=10)
+        buffer_box.pack(anchor=W, pady=(0, 10))
+        Tooltip(
+            buffer_box,
+            (
+                "Number of recent health samples to store.\n\n"
+                "The scanner always reports the lowest value in the buffer (as health only goes down), "
+                "so drops in health appear instantly. "
+                "A larger buffer filters out noise but takes longer to return to an accurate value "
+                "after the health bar disappears (death, inventory, etc.)."
+            )
+        )
 
         tb.Button(
             self.settings_frame,
