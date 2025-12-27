@@ -305,8 +305,7 @@ class DDT(tb.Window):
             self.settings_frame,
             text="Enable Overlay",
             variable=self.overlay_enabled_var,
-            bootstyle="round-toggle",
-            command=self._toggle_overlay
+            bootstyle="round-toggle"
         )
         overlay_check.pack(anchor=W, pady=(10, 10))
         Tooltip(
@@ -436,7 +435,7 @@ class DDT(tb.Window):
         # Start a new scanner with updated settings
         self._auto_start_scanner()
 
-    def _toggle_overlay(self):
+        # Handle overlay start/stop
         if self.overlay_enabled_var.get():
             self.overlay.start()
         else:

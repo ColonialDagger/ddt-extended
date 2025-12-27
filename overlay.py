@@ -27,7 +27,7 @@ WS_EX_TOOLWINDOW  = 0x00000080
 
 LWA_COLORKEY = 0x00000001
 
-TRANSPARENT_COLOR = 0x00FF00FF  # magenta color key
+TRANSPARENT_COLOR = 0x00FF00FF  # magenta colorkey
 
 # Overlay mode constants
 MODE_FULLSCREEN = 1
@@ -111,12 +111,14 @@ class Overlay:
         3. Updates health information in real-time
         4. Runs in a separate thread to avoid blocking the main application
     """
+    _class_registered = False
 
     def __init__(self):
         self.overlay_hwnd = None
         self.health_text = "Health: ??"
         self.running = False
         self.current_mode = MODE_HIDDEN
+        self._wndproc = None
 
     # Public API
     def start(self) -> None:
@@ -351,23 +353,28 @@ class Overlay:
         # Keep callback alive on the instance
         self._wndproc = WNDPROC(self._wnd_proc)
 
-        wc = WNDCLASS()
-        wc.style = 0
-        wc.lpfnWndProc = self._wndproc
-        wc.cbClsExtra = 0
-        wc.cbWndExtra = 0
-        wc.hInstance = hInstance
-        wc.hIcon = None
-        wc.hCursor = user32.LoadCursorW(None, 32512)
-        wc.hbrBackground = None
-        wc.lpszMenuName = None
-        wc.lpszClassName = CLASS_NAME
+        # Register class only once
+        if not Overlay._class_registered:
+            wc = WNDCLASS()
+            wc.style = 0
+            wc.lpfnWndProc = self._wndproc
+            wc.cbClsExtra = 0
+            wc.cbWndExtra = 0
+            wc.hInstance = hInstance
+            wc.hIcon = None
+            wc.hCursor = user32.LoadCursorW(None, 32512)
+            wc.hbrBackground = None
+            wc.lpszMenuName = None
+            wc.lpszClassName = CLASS_NAME
 
-        atom = user32.RegisterClassW(ctypes.byref(wc))
-        if not atom:
-            print("RegisterClassW failed:", kernel32.GetLastError())
-            return
+            atom = user32.RegisterClassW(ctypes.byref(wc))
+            if not atom:
+                print("RegisterClassW failed:", kernel32.GetLastError())
+                return
 
+            Overlay._class_registered = True
+
+        # Create window
         w = user32.GetSystemMetrics(0)
         h = user32.GetSystemMetrics(1)
 
