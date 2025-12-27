@@ -44,6 +44,10 @@ python -m nuitka .\gui.py `
   --include-data-file="utils.py=utils.py" `
   --include-data-file="README.md=README.md" `
   --include-data-file="LICENSE=LICENSE" `
+  --include-onefile-external-data=negatives `
+  --include-onefile-external-data=utils.py `
+  --include-onefile-external-data=README.md `
+  --include-onefile-external-data=LICENSE `
   --output-dir="builds/w11-onefile" `
   --windows-console-mode=disable
 ```
