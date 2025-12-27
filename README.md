@@ -7,7 +7,7 @@ Inspired by [A2TC-YT/Destiny-Damage-Tracker](https://github.com/A2TC-YT/Destiny-
 ## Platforms Supported
 * Windows 11
 
-## Dependencies
+## Build Dependencies
 * Python 3.12
 
 ## Building
@@ -44,7 +44,7 @@ python -m nuitka .\gui.py `
   --include-data-file="utils.py=utils.py" `
   --include-data-file="README.md=README.md" `
   --include-data-file="LICENSE=LICENSE" `
-  --output-dir="builds/onefile" `
+  --output-dir="builds/w11-onefile" `
   --windows-console-mode=disable
 ```
 
