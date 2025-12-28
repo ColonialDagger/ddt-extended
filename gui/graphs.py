@@ -261,7 +261,7 @@ class DpsGraphCanvas(FigureCanvas):
         for t, d in zip(times, deriv_values):
             if t >= t_min:
                 trimmed_t.append(t - t_max)
-                trimmed_d.append(min(d, 0))  # clamp positive values
+                trimmed_d.append(d)
 
         if not trimmed_t:
             return

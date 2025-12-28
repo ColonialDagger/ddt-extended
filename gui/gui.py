@@ -203,7 +203,7 @@ class MainWindow(QMainWindow):
         # Time base
         now = time.time() - self._t0
 
-        # Health Graph (%/t
+        # Health Graph (H%/t)
         self._health_times.append(now)
         self._health_values.append(health)
 
@@ -213,14 +213,14 @@ class MainWindow(QMainWindow):
 
         self.health_canvas.update_series(self._health_times, self._health_values)
 
-        # Derivative graph (d%/dt)
+        # Derivative graph (dD%/dt)
         if len(self._health_values) >= 2:
             dh = self._health_values[-1] - self._health_values[-2]
             dt = self._health_times[-1] - self._health_times[-2]
             raw_deriv = dh / dt if dt > 0 else 0
 
             # Clamp positive values (boss cannot heal)
-            deriv = min(raw_deriv, 0)
+            deriv = abs(raw_deriv)
         else:
             deriv = 0
 
