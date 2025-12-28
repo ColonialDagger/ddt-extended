@@ -658,98 +658,96 @@ class Scanner:
         :return: None
         """
 
-        capture = WindowsCapture(
-            cursor_capture=False,
-            draw_border=False,
-            monitor_index=None,
-            window_name=self.window_name,
-        )
+        def worker():
+            capture = WindowsCapture(
+                cursor_capture=False,
+                draw_border=False,
+                monitor_index=None,
+                window_name=self.window_name,
+            )
 
-        # Start capture in a separate thread so start_capture() returns immediately.
-        # WindowsCapture.start() runs the capture loop internally; run it on a thread.
-        self._stop_requested = False
+            # Start capture in a separate thread so start_capture() returns immediately.
+            # WindowsCapture.start() runs the capture loop internally; run it on a thread.
+            self._stop_requested = False
 
-        # called every time a new frame is available
-        @capture.event
-        def on_frame_arrived(frame: Frame, capture_control: InternalCaptureControl) -> None:
-            """
-            Called every time a frame is captured.
+            # called every time a new frame is available
+            @capture.event
+            def on_frame_arrived(frame: Frame, capture_control: InternalCaptureControl) -> None:
+                """
+                Called every time a frame is captured.
 
-            :param frame: Frame
-                The Frame object of the last captured frame.
-            :param capture_control: InternalCaptureControl
-                The capture control object.
-            :return: None
-            """
-            try:
-                # Keep a reference to the capture control so stop_capture() can call it
-                self._capture_control = capture_control
+                :param frame: Frame
+                    The Frame object of the last captured frame.
+                :param capture_control: InternalCaptureControl
+                    The capture control object.
+                :return: None
+                """
+                try:
+                    # Keep a reference to the capture control so stop_capture() can call it
+                    self._capture_control = capture_control
 
-                # Crop to healthbar region, drop alpha
-                y1, y2, x1, x2 = self.y1, self.y2, self.x1, self.x2
-                cropped = frame.frame_buffer[y1:y2, x1:x2, :-1]
+                    # Crop to healthbar region, drop alpha
+                    y1, y2, x1, x2 = self.y1, self.y2, self.x1, self.x2
+                    cropped = frame.frame_buffer[y1:y2, x1:x2, :-1]
 
-                raw_health_fraction = self._estimate_health(
-                    cropped_img=cropped,
-                    neg_mask=self.neg_mask,
-                    color_reference=self.color_reference,
-                    min_col_fraction=0.60,  # TODO Try reducing this and see what happens. Consider Golden Gun, etc.
-                    edge_width=1
-                )
+                    raw_health_fraction = self._estimate_health(
+                        cropped_img=cropped,
+                        neg_mask=self.neg_mask,
+                        color_reference=self.color_reference,
+                        min_col_fraction=0.60,  # TODO Try reducing this and see what happens. Consider Golden Gun, etc.
+                        edge_width=1
+                    )
 
-                # Keeps buffer at the specified size and reports minimum health in order to avoid artifacts like
-                # Well or Golden Gun creating bad data. Health can only ever go down, so the minimum value in the buffer
-                # is reported to ensure instant measurements for data while avoiding showing inflated data points.
-                # Size is determined by health_buffer_size, which is a frame count.
-                self.health_buffer.append(raw_health_fraction)
-                if len(self.health_buffer) > self.health_buffer_size:
-                    self.health_buffer.pop(0)
-                new_health_fraction = min(self.health_buffer)  # 0–1
+                    # Keeps buffer at the specified size and reports minimum health in order to avoid artifacts like
+                    # Well or Golden Gun creating bad data. Health can only ever go down, so the minimum value in the buffer
+                    # is reported to ensure instant measurements for data while avoiding showing inflated data points.
+                    # Size is determined by health_buffer_size, which is a frame count.
+                    self.health_buffer.append(raw_health_fraction)
+                    if len(self.health_buffer) > self.health_buffer_size:
+                        self.health_buffer.pop(0)
+                    new_health_fraction = min(self.health_buffer)  # 0–1
 
-                # Timing data
-                now = time.time()
-                self.delta_t = now - self.t_last
-                self.t_last = now
+                    # Timing data
+                    now = time.time()
+                    self.delta_t = now - self.t_last
+                    self.t_last = now
 
-                # Phase tracking update
-                prev_fraction = self._last_health_fraction
-                if prev_fraction is None:
-                    prev_fraction = new_health_fraction
-                self._update_phase_state(
-                    now=now,
-                    prev_health=prev_fraction,
-                    current_health=new_health_fraction
-                )
-                self._last_health_fraction = new_health_fraction
+                    # Phase tracking update
+                    prev_fraction = self._last_health_fraction or new_health_fraction
+                    self._update_phase_state(now, prev_fraction, new_health_fraction)
+                    self._last_health_fraction = new_health_fraction
 
-                # Publish health for external callers
-                self.health = new_health_fraction
+                    # Publish health for external callers
+                    self.health = new_health_fraction
 
-                # Get brightest and darkest pixels over a runtime. Used to get color references for lookup table.
-                if self.get_colors:
-                    self._get_darkest_and_brightest_pixels(cropped, neg_mask=self.neg_mask)
+                    # Get brightest and darkest pixels over a runtime. Used to get color references for lookup table.
+                    if self.get_colors:
+                        self._get_darkest_and_brightest_pixels(cropped, neg_mask=self.neg_mask)
 
-                # Sends pixel data to a CSV file. Used to determine color data
-                if self.pixel_output:
-                    self._pixels_to_csv(self.pixel_output, cropped[self.neg_mask])
+                    # Sends pixel data to a CSV file. Used to determine color data
+                    if self.pixel_output:
+                        self._pixels_to_csv(self.pixel_output, cropped[self.neg_mask])
 
-                # Stop capture when requested
-                if self._stop_requested:
-                    capture_control.stop()
-            except Exception as e:
-                print("ERROR: ", e)
+                    # Stop capture when requested
+                    if self._stop_requested:
+                        capture_control.stop()
 
-        # Called when the capture item closes (usually when the window closes).
-        @capture.event
-        def on_closed() -> None:
-            """
-            Called when the window is closed.
+                except Exception as e:
+                    print("ERROR: ", e)
 
-            :return: None
-            """
-            print("Window has been closed")
+            # Called when the capture item closes (usually when the window closes).
+            @capture.event
+            def on_closed() -> None:
+                """
+                Called when the window is closed.
 
-        capture.start()
+                :return: None
+                """
+                print("Window has been closed.")
+
+            capture.start()
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def stop_capture(self) -> None:
         """
