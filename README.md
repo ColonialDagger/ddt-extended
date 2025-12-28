@@ -35,17 +35,15 @@ pip install -r requirements.txt
 4. Build the program.
    
 ```powershell
-python -m nuitka .\gui.py `
+python -m nuitka .\ddt.py `
   --onefile `
   --mingw64 `
   --enable-plugin=numpy `
-  --enable-plugin=tk-inter `
+  --enable-plugin=pyside6 `
   --include-data-dir="negatives=negatives" `
-  --include-data-file="utils.py=utils.py" `
   --include-data-file="README.md=README.md" `
   --include-data-file="LICENSE=LICENSE" `
   --include-onefile-external-data=negatives `
-  --include-onefile-external-data=utils.py `
   --include-onefile-external-data=README.md `
   --include-onefile-external-data=LICENSE `
   --output-dir="builds/w11-onefile" `
@@ -53,5 +51,4 @@ python -m nuitka .\gui.py `
 ```
 
 ## Known Issues
-* Only brightness 4 works.
-* Delta_T sometimes reports 0.0ms.
+* When opening the scanner, the derivative graph gridlines are not actualized until the first update.
