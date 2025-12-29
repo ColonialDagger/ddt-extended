@@ -1,3 +1,4 @@
+import cv2
 import numpy as np
 import pandas as pd
 from sklearn.mixture import GaussianMixture
@@ -9,7 +10,7 @@ import os
 # CONFIG
 # -----------------------------
 DATA_FOLDER = "data"
-N_COMPONENTS = 3          # You can increase to 5 or 8 if needed
+N_COMPONENTS = 5          # You can increase to 5 or 8 if needed
 KEEP_FRACTION = 0.999     # Keep 99.9% of points
 COV_TYPE = "full"         # "full" or "tied" recommended
 
@@ -17,7 +18,19 @@ COV_TYPE = "full"         # "full" or "tied" recommended
 def train_gmm_for_file(csv_path):
     """Load CSV, train GMM, return parameters."""
     df = pd.read_csv(csv_path, header=None)
-    points = df.to_numpy(dtype=np.float64)
+
+    rgb = df.to_numpy(dtype=np.float64).reshape(-1, 1, 3).astype(np.uint8)
+    luv = cv2.cvtColor(rgb, cv2.COLOR_BGR2LUV).reshape(-1, 3).astype(np.float64)
+
+    u = luv[:, 1]
+    v = luv[:, 2]
+
+    uv = np.stack([u, v], axis=1)
+    uv_norm = np.sqrt(u * u + v * v)
+
+    # keep only strong‑chroma pixels
+    mask = uv_norm >= 15 # e.g. tune 5, 10, 15 in LUV units
+    points = uv[mask]
 
     gmm = GaussianMixture(
         n_components=N_COMPONENTS,
@@ -52,19 +65,19 @@ def train_gmm_for_file(csv_path):
 
 def main():
     # Find all brightness CSVs
-    files = sorted(glob.glob(os.path.join(DATA_FOLDER, "pixels_unique_b*.csv")))
+    files = sorted(glob.glob(os.path.join(DATA_FOLDER, "pixels_*.csv")))
 
     color_refs = {}
 
     for f in files:
         # Extract brightness number from filename
         base = os.path.basename(f)
-        brightness = int(base.split("_b")[1].split(".")[0])
+        colorblind = base.split("_")[1].split(".")[0]
 
-        print(f"Training brightness {brightness} from {base}...")
+        print(f"Training colorblind mode {colorblind} from {base}...")
 
         params = train_gmm_for_file(f)
-        color_refs[brightness] = params
+        color_refs[colorblind] = params
 
     # Pretty-print dictionary so you can paste it into Scanner
     print("\n\n==================== COPY BELOW ====================\n")

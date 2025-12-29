@@ -103,7 +103,7 @@ class HealthGraphCanvas(FigureCanvas):
         self._time_window = time_window
 
         # Tight layout for HUD look
-        self.fig.subplots_adjust(left=0.07, right=0.92, top=0.96, bottom=0.04)
+        self.fig.subplots_adjust(left=0.08, right=0.92, top=0.96, bottom=0.04)
 
     def update_series(self, times, health_values):
         """
@@ -240,7 +240,7 @@ class DpsGraphCanvas(FigureCanvas):
         )
 
         self._time_window = time_window
-        self.fig.subplots_adjust(left=0.07, right=0.92, top=0.96, bottom=0.04)
+        self.fig.subplots_adjust(left=0.08, right=0.92, top=0.96, bottom=0.04)
 
     def update_series(self, times, deriv_values):
         """

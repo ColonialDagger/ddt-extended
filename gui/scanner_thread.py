@@ -13,15 +13,15 @@ class ScannerThread(QObject):
     fps_changed = Signal(float)
     delta_changed = Signal(float)
 
-    def __init__(self, brightness=4, buffer_size=30):
+    def __init__(self, colorblind_mode="normal", buffer_size=10):
         """
-        :param brightness: int
-            In-game brightness level (1-7)
+        :param colorblind_mode: int
+            In-game colorblind mode (1-7)
         :param buffer_size:
             Number of frames to buffer for FPS calculation
         """
         super().__init__()
-        self._brightness = brightness
+        self._colorblind_mode = colorblind_mode
         self._buffer_size = buffer_size
         self._running = False
         self._thread = None
@@ -49,7 +49,7 @@ class ScannerThread(QObject):
         ctypes.windll.ole32.CoInitializeEx(None, 2)
 
         # Create scanner in this thread
-        self._scanner = scanner.Scanner(self._brightness, self._buffer_size)
+        self._scanner = scanner.Scanner(self._colorblind_mode, self._buffer_size)
 
         while self._running:
             health = self._scanner.get_health()

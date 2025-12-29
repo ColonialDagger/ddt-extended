@@ -91,9 +91,14 @@ class MainWindow(QMainWindow):
 
         form = QFormLayout()
 
-        self.brightness_box = QComboBox()
-        self.brightness_box.addItems([str(i) for i in range(1, 8)])
-        form.addRow("Brightness:", self.brightness_box)
+        self.colorblind_box = QComboBox()
+        self.colorblind_box.addItems([
+            "Normal",
+            # TODO Add deuteranopia
+            # TODO Add protanopia
+            # TODO Add tritanopia
+        ])
+        form.addRow("Colorblind mode:", self.colorblind_box)
 
         self.buffer_spin = QSpinBox()
         self.buffer_spin.setRange(1, 120)
@@ -127,12 +132,12 @@ class MainWindow(QMainWindow):
         self.apply_button.clicked.connect(self.apply_settings)
 
         # Start scanner auto-retry thread
-        brightness = int(self.brightness_box.currentText())
+        colorblind_mode = self.colorblind_box.currentText().lower()
         buffer_size = int(self.buffer_spin.value())
 
         threading.Thread(
             target=self._scanner_retry_loop,
-            args=(brightness, buffer_size),
+            args=(colorblind_mode, buffer_size),
             daemon=True
         ).start()
 
@@ -144,11 +149,11 @@ class MainWindow(QMainWindow):
         """
         self.overlay = OverlayWindow()
 
-    def _scanner_retry_loop(self, brightness, buffer_size):
+    def _scanner_retry_loop(self, colorblind_mode, buffer_size):
         """
         Retry loop to create and start the scanner.
 
-        :param brightness:
+        :param colorblind_mode:
         :param buffer_size:
         :return:
         """
@@ -159,7 +164,7 @@ class MainWindow(QMainWindow):
                 self.status_update.emit("Status: Searching for Destiny 2…")
 
                 s = scanner.Scanner(
-                    brightness=brightness,
+                    colorblind_mode=colorblind_mode,
                     health_buffer_size=buffer_size
                 )
 
@@ -220,7 +225,7 @@ class MainWindow(QMainWindow):
             raw_deriv = dh / dt if dt > 0 else 0
 
             # Clamp positive values (boss cannot heal)
-            deriv = abs(raw_deriv)
+            deriv = abs(min(raw_deriv, 0))
         else:
             deriv = 0
 
@@ -269,18 +274,14 @@ class MainWindow(QMainWindow):
         self._scanner = None
         self._scanner_ready = False
 
-        # Clear graph history
-        self._health_times.clear()
-        self._health_values.clear()
-
         # Read new settings
-        brightness = int(self.brightness_box.currentText())
+        colorblind_mode = self.colorblind_box.currentText().lower()
         buffer_size = int(self.buffer_spin.value())
 
         # Start retry loop again
         threading.Thread(
             target=self._scanner_retry_loop,
-            args=(brightness, buffer_size),
+            args=(colorblind_mode, buffer_size),
             daemon=True
         ).start()
 
