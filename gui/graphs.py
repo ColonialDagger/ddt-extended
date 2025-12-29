@@ -194,7 +194,7 @@ class DpsGraphCanvas(FigureCanvas):
 
         # Labels
         self.ax.set_xlabel("")
-        self.ax.set_ylabel("dHealth/dt (%/s)", fontsize=8, labelpad=10, color="#FFFFFF")
+        self.ax.set_ylabel("DPS (%/s)", fontsize=8, labelpad=10, color="#FFFFFF")
         self.ax.set_title("")
 
         # Y ticks (autoscale will override)

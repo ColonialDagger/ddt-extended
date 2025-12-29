@@ -92,7 +92,7 @@ class MainWindow(QMainWindow):
         form = QFormLayout()
 
         self.colorblind_box = QComboBox()
-        self.colorblind_box.addItems([
+        self.colorblind_box.addItems([  # TODO On launch, if no AppData settings, read from Destiny cvars.xml
             "Normal",
             # TODO Add deuteranopia
             # TODO Add protanopia
@@ -219,18 +219,22 @@ class MainWindow(QMainWindow):
         self.health_canvas.update_series(self._health_times, self._health_values)
 
         # Derivative graph (dD%/dt)
-        if len(self._health_values) >= 2:
-            dh = self._health_values[-1] - self._health_values[-2]
-            dt = self._health_times[-1] - self._health_times[-2]
-            raw_deriv = dh / dt if dt > 0 else 0
+        WINDOW = 0.25  # 250 ms  # TODO: Expose to user as a setting?
 
-            # Clamp positive values (boss cannot heal)
-            deriv = abs(min(raw_deriv, 0))
-        else:
-            deriv = 0
+        # Find the earliest index within the window
+        cutoff = now - WINDOW
+        i = len(self._health_times) - 1
+        while i > 0 and self._health_times[i] > cutoff:
+            i -= 1
+
+        dh = self._health_values[-1] - self._health_values[i]
+        dt = self._health_times[-1] - self._health_times[i]
+
+        raw_deriv = dh / dt if dt > 0 else 0
+        dps = abs(min(raw_deriv, 0))
 
         self._dps_times.append(now)
-        self._dps_values.append(deriv)
+        self._dps_values.append(dps)
 
         if len(self._dps_times) > 2000:
             self._dps_times = self._dps_times[-2000:]
