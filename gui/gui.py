@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
     QPushButton, QSizePolicy, QCheckBox
 )
 
-from gui.graphs import HealthGraphCanvas, DpsGraphCanvas
+from gui.graphs import HealthGraphWidget, DpsGraphWidget
 from gui.overlay import OverlayWindow
 import scanner
 
@@ -71,10 +71,10 @@ class MainWindow(QMainWindow):
         graphs_group = QGroupBox("Graphs")
         graphs_layout = QVBoxLayout()
 
-        self.health_canvas = HealthGraphCanvas()
+        self.health_canvas = HealthGraphWidget()
         self.health_canvas.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
-        self.dps_canvas = DpsGraphCanvas()
+        self.dps_canvas = DpsGraphWidget()
         self.dps_canvas.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
         graphs_layout.addWidget(self.health_canvas, 1)

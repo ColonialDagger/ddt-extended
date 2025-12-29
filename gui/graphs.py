@@ -1,264 +1,130 @@
-from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.figure import Figure
-from PySide6.QtGui import QColor
+import pyqtgraph as pg
+from PySide6.QtWidgets import QWidget, QVBoxLayout
 
-class HealthGraphCanvas(FigureCanvas):
-    """
-    Matplotlib canvas for plotting health over time. Displays health percentage (0-100%).
-    """
-
+class HealthGraphWidget(QWidget):
     def __init__(self, parent=None, time_window=60.0):
-        """
-        2D line graph of health over time.
-        :param parent:
-        :param time_window: float
-            seconds of history to display
-        """
-        # Figure background
-        self.fig = Figure(figsize=(5, 3), facecolor="#1e1e1e")
-        super().__init__(self.fig)
-        self.setParent(parent)
+        super().__init__(parent)
 
-        # Match Qt canvas background (fixes white edge line)
-        self.setAutoFillBackground(True)
-        p = self.palette()
-        p.setColor(self.backgroundRole(), QColor("#1e1e1e"))
-        self.setPalette(p)
-        self.setStyleSheet("background-color: #1e1e1e; border: none;")
-
-        # Axes setup
-        self.ax = self.fig.add_subplot(111)
-        self.ax.set_facecolor("#1e1e1e")
-        self.ax.ticklabel_format(style='plain', axis='y')
-
-        # Remove spines (borders)
-        for spine in self.ax.spines.values():
-            spine.set_visible(False)
-
-        # Remove labels and titles
-        self.ax.set_xlabel("")
-        self.ax.set_ylabel("Health (%)", fontsize=8, labelpad=10, color="#FFFFFF")
-        self.ax.set_title("")
-
-        # Invisible ticks (required for gridlines)
-        # Y ticks for horizontal gridlines
-        self.ax.set_yticks([0, 20, 40, 60, 80, 100])
-        self.ax.tick_params(axis="y", length=0, labelsize=8, pad=-2, colors="#FFFFFF",)
-        for label in self.ax.get_yticklabels():
-            label.set_horizontalalignment("left")
-
-        # X ticks for vertical gridlines
-        x_ticks = [-60, -50, -40, -30, -20, -10, 0]
-        self.ax.set_xticks(x_ticks)
-        self.ax.tick_params(axis="x", length=0, labelsize=0)
-
-        # Ensure grid draws above background
-        self.ax.set_axisbelow(False)
-        self.ax.patch.set_zorder(0)
-
-        # Gridlines
-        self.ax.grid(axis="x", color="#FFFFFF", alpha=0.25, linewidth=1.0, zorder=5)
-        self.ax.grid(axis="y", color="#FFFFFF", alpha=0.25, linewidth=1.0, zorder=5)
-
-        # Health line (heart-style)
-        self._line, = self.ax.plot([], [], color="red", linewidth=2.5)
-
-        # Underfill placeholder
-        self._fill = None
-
-        # Floating labels outside the graph (left + right)
-        self._label_oldest = self.ax.text(
-            -0.02, 0, "",
-            transform=self.ax.get_yaxis_transform(),
-            color="white",
-            fontsize=8,
-            ha="right",
-            va="center",
-            bbox=dict(
-                boxstyle="round,pad=0.2",
-                facecolor="#1e1e1e",
-                edgecolor="red",
-                linewidth=0.8,
-                alpha=0.8
-            )
-        )
-
-        self._label_newest = self.ax.text(
-            1.02, 0, "",
-            transform=self.ax.get_yaxis_transform(),
-            color="white",
-            fontsize=8,
-            ha="left",
-            va="center",
-            bbox=dict(
-                boxstyle="round,pad=0.2",
-                facecolor="#1e1e1e",
-                edgecolor="red",
-                linewidth=0.8,
-                alpha=0.8
-            )
-        )
-
-        # Time window
         self._time_window = time_window
 
-        # Tight layout for HUD look
-        self.fig.subplots_adjust(left=0.08, right=0.92, top=0.96, bottom=0.04)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
 
-    def update_series(self, times, health_values):
-        """
-        Update the health time series data.
+        self.plot = pg.PlotWidget(background="#1e1e1e")
+        layout.addWidget(self.plot)
 
-        :param times:
-        :param health_values:
-        :return:
-        """
-        if not times:
-            return
+        self.plot.showGrid(x=True, y=True, alpha=0.25)
+        self.plot.setLabel("left", "Health (%)", color="white")
+        self.plot.setMouseEnabled(x=False, y=False)
 
-        # Trim to last time_window seconds
-        t_max = times[-1]
-        t_min = t_max - self._time_window
-        trimmed_t = []
-        trimmed_h = []
-        for t, h in zip(times, health_values):
-            if t >= t_min:
-                trimmed_t.append(t - t_max)  # shift so latest point is at 0
-                trimmed_h.append(h)
+        ax_left = self.plot.getAxis("left")
+        ax_left.setPen(pg.mkPen(color="white"))
+        ax_left.setTextPen(pg.mkPen(color="white"))
+        ax_left.setTicks([
+            [(0, "0"), (20, "20"), (40, "40"), (60, "60"), (80, "80"), (100, "100")],
+            [(10, "10"), (30, "30"), (50, "50"), (70, "70"), (90, "90")],
+        ])
 
-        # Update line
-        self._line.set_data(trimmed_t, trimmed_h)
+        ax_bottom = self.plot.getAxis("bottom")
+        ax_bottom.setPen(pg.mkPen(color="white"))
+        ax_bottom.setTextPen(pg.mkPen(color="white"))
 
-        # Update underfill
-        if self._fill:
-            self._fill.remove()
-            self._fill = None
-
-        if trimmed_t:
-            self._fill = self.ax.fill_between(
-                trimmed_t,
-                trimmed_h,
-                0,
-                color="red",
-                alpha=0.15
-            )
-
-        # Floating labels for oldest + newest points
-        if trimmed_t:
-            # Oldest point
-            h_old = trimmed_h[0]
-            self._label_oldest.set_y(h_old)
-            self._label_oldest.set_text(f"{h_old:.2f}")
-
-            # Newest point
-            h_new = trimmed_h[-1]
-            self._label_newest.set_y(h_new)
-            self._label_newest.set_text(f"{h_new:.2f}")
-
-        self.ax.set_xlim(-self._time_window, 0)
-        self.ax.set_ylim(0, 100)
-        self.ax.figure.canvas.draw_idle()
-
-class DpsGraphCanvas(FigureCanvas):
-    """
-    Matplotlib canvas for plotting d(health)/dt over time. Displays health change rate (%/s).
-    """
-    def __init__(self, parent=None, time_window=60.0):
-        """
-        2D line graph of health change rate over time.
-
-        :param parent:
-        :param time_window: float
-            seconds of history to display
-        """
-        # Figure background
-        self.fig = Figure(figsize=(5, 3), facecolor="#1e1e1e")
-        super().__init__(self.fig)
-        self.setParent(parent)
-
-        # Match Qt canvas background
-        self.setAutoFillBackground(True)
-        p = self.palette()
-        p.setColor(self.backgroundRole(), QColor("#1e1e1e"))
-        self.setPalette(p)
-        self.setStyleSheet("background-color: #1e1e1e; border: none;")
-
-        # Axes setup
-        self.ax = self.fig.add_subplot(111)
-        self.ax.set_facecolor("#1e1e1e")
-        self.ax.ticklabel_format(style='plain', axis='y')
-
-        # Remove spines
-        for spine in self.ax.spines.values():
-            spine.set_visible(False)
-
-        # Labels
-        self.ax.set_xlabel("")
-        self.ax.set_ylabel("DPS (%/s)", fontsize=8, labelpad=10, color="#FFFFFF")
-        self.ax.set_title("")
-
-        # Y ticks (autoscale will override)
-        self.ax.set_yticks([20, 40, 60, 80, 100])  # Large numbers prevent scaling bug on startup
-        self.ax.tick_params(axis="y", length=0, labelsize=8, pad=-15, colors="#FFFFFF")
-
-        # X ticks
-        x_ticks = [-60, -50, -40, -30, -20, -10, 0]
-        self.ax.set_xticks(x_ticks)
-        self.ax.tick_params(axis="x", length=0, labelsize=0)
-
-        # Gridlines
-        self.ax.set_axisbelow(False)
-        self.ax.patch.set_zorder(0)
-        self.ax.grid(axis="y", color="#FFFFFF", alpha=0.25, linewidth=1.0, zorder=5)
-        self.ax.grid(axis="x", color="#FFFFFF", alpha=0.25, linewidth=1.0, zorder=5)
-
-        # Line + fill
-        self._line, = self.ax.plot([], [], color="cyan", linewidth=2.5)
-        self._fill = None
-
-        # Floating labels
-        self._label_oldest = self.ax.text(
-            -0.02, 0, "",
-            transform=self.ax.get_yaxis_transform(),
-            color="white",
-            fontsize=8,
-            ha="right",
-            va="center",
-            bbox=dict(boxstyle="round,pad=0.2", facecolor="#1e1e1e",
-                      edgecolor="cyan", linewidth=0.8, alpha=0.8)
+        self.curve = self.plot.plot([], [], pen=pg.mkPen("red", width=2.5))
+        self.zero_curve = pg.PlotCurveItem([], [], pen=None)
+        self.fill = pg.FillBetweenItem(
+            self.curve,
+            self.zero_curve,
+            brush=pg.mkBrush(255, 0, 0, 60)
         )
+        self.plot.addItem(self.fill)
 
-        self._label_newest = self.ax.text(
-            1.02, 0, "",
-            transform=self.ax.get_yaxis_transform(),
-            color="white",
-            fontsize=8,
-            ha="left",
-            va="center",
-            bbox=dict(boxstyle="round,pad=0.2", facecolor="#1e1e1e",
-                      edgecolor="cyan", linewidth=0.8, alpha=0.8)
-        )
+        self.plot.setXRange(-self._time_window, 0, padding=0)
+        self.plot.setYRange(0, 100, padding=0)
+        self.plot.enableAutoRange(axis='x', enable=False)
+        self.plot.enableAutoRange(axis='y', enable=False)
 
-        self._time_window = time_window
-        self.fig.subplots_adjust(left=0.08, right=0.92, top=0.96, bottom=0.04)
+        # Force consistent left-axis width
+        plot_item = self.plot.getPlotItem()
+        left_axis = self.plot.getPlotItem().getAxis("left")
+        left_axis.setWidth(40)
 
-    def update_series(self, times, deriv_values):
-        """
-        Update the d(health)/dt time series data.
-
-        :param times:
-        :param deriv_values:
-        :return:
-        """
+    def update_series(self, times, values):
         if not times:
             return
 
         # Trim to window
         t_max = times[-1]
         t_min = t_max - self._time_window
+
+        trimmed_t = []
+        trimmed_h = []
+
+        for t, h in zip(times, values):
+            if t >= t_min:
+                trimmed_t.append(t - t_max)
+                trimmed_h.append(h)
+
+        # Update line
+        self.curve.setData(trimmed_t, trimmed_h)
+
+        # Update fill (zero baseline)
+        self.zero_curve.setData(trimmed_t, [0] * len(trimmed_t))
+
+class DpsGraphWidget(QWidget):
+    def __init__(self, parent=None, time_window=60.0):
+        super().__init__(parent)
+
+        self._time_window = time_window
+        self._ymax = 1
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        self.plot = pg.PlotWidget(background="#1e1e1e")
+        layout.addWidget(self.plot)
+
+        self.plot.showGrid(x=True, y=True, alpha=0.25)
+        self.plot.setLabel("left", "DPS (%/s)", color="white")
+        self.plot.setMouseEnabled(x=False, y=False)
+
+        ax_left = self.plot.getAxis("left")
+        ax_left.setPen(pg.mkPen(color="white"))
+        ax_left.setTextPen(pg.mkPen(color="white"))
+
+        ax_bottom = self.plot.getAxis("bottom")
+        ax_bottom.setPen(pg.mkPen(color="white"))
+        ax_bottom.setTextPen(pg.mkPen(color="white"))
+
+        self.curve = self.plot.plot([], [], pen=pg.mkPen("cyan", width=2.5))
+        self.zero_curve = pg.PlotCurveItem([], [], pen=None)
+        self.fill = pg.FillBetweenItem(
+            self.curve,
+            self.zero_curve,
+            brush=pg.mkBrush(0, 255, 255, 60)
+        )
+        self.plot.addItem(self.fill)
+
+        self.plot.setXRange(-self._time_window, 0, padding=0)
+        self.plot.setYRange(0, self._ymax, padding=0)
+        self.plot.enableAutoRange(axis='x', enable=False)
+
+        # Force consistent left-axis width
+        plot_item = self.plot.getPlotItem()
+        left_axis = self.plot.getPlotItem().getAxis("left")
+        left_axis.setWidth(40)
+
+    def update_series(self, times, values):
+        if not times:
+            return
+
+        # Trim to window
+        t_max = times[-1]
+        t_min = t_max - self._time_window
+
         trimmed_t = []
         trimmed_d = []
-        for t, d in zip(times, deriv_values):
+
+        for t, d in zip(times, values):
             if t >= t_min:
                 trimmed_t.append(t - t_max)
                 trimmed_d.append(d)
@@ -267,34 +133,14 @@ class DpsGraphCanvas(FigureCanvas):
             return
 
         # Update line
-        self._line.set_data(trimmed_t, trimmed_d)
+        self.curve.setData(trimmed_t, trimmed_d)
 
         # Update fill
-        if self._fill:
-            self._fill.remove()
-        self._fill = self.ax.fill_between(trimmed_t, trimmed_d, 0, color="cyan", alpha=0.15)
+        self.zero_curve.setData(trimmed_t, [0] * len(trimmed_t))
 
-        # Floating labels
-        self._label_oldest.set_y(trimmed_d[0])
-        self._label_oldest.set_text(f"{trimmed_d[0]:.2f}")
-
-        self._label_newest.set_y(trimmed_d[-1])
-        self._label_newest.set_text(f"{trimmed_d[-1]:.2f}")
-
-        # Axes limits
-        self.ax.set_xlim(-self._time_window, 0)
-
-        # Minimum Y range
-        MIN_RANGE = 1.0  # %/s
+        # Expand Y range only when needed
         d_max = max(trimmed_d)
-        upper = max(MIN_RANGE, d_max * 1.1)
+        if d_max > self._ymax:
+            self._ymax = d_max * 1.1
+            self.plot.setYRange(0, self._ymax, padding=0)
 
-        self.ax.set_ylim(0, upper)
-
-        # Dynamic Y ticks
-        num_ticks = 5
-        step = upper / num_ticks
-        ticks = [i * step for i in range(num_ticks + 1)]
-        self.ax.set_yticks(ticks)
-
-        self.ax.figure.canvas.draw_idle()
