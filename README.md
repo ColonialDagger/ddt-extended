@@ -2,8 +2,6 @@
 
 Destiny Damage Tracker Extended is a damage scanner utility for Destiny 2. DDT-ext tracks the health of a boss via the health bar, allowing for more accurate health readings.
 
-Inspired by [A2TC-YT/Destiny-Damage-Tracker](https://github.com/A2TC-YT/Destiny-Damage-Tracker).
-
 ## Platforms Supported
 * Windows 11
 
@@ -52,3 +50,13 @@ python -m nuitka .\ddt.py `
 
 ## Known Issues
 * When opening the scanner, the derivative graph gridlines are not actualized until the first update.
+
+## License
+This project is license under the GNU General Public License v3.0. See the [LICENSE](LICENSE) file and [tl;drLegal](https://www.tldrlegal.com/license/gnu-general-public-license-v3-gpl-3) for details.
+
+## Credits
+* Inspired by [A2TC-YT/Destiny-Damage-Tracker](https://github.com/A2TC-YT/Destiny-Damage-Tracker).
+* <a href="https://www.flaticon.com/free-icons/heart" title="heart icons">Heart icons created by Good Ware - Flaticon</a>
+* `windows-capture` library by [NiiightmareXD/windows-capture](https://github.com/NiiightmareXD/windows-capture/tree/main/windows-capture-python)
+* `nuitka` compiler by [Nuitka/Nuitka](https://github.com/Nuitka/Nuitka).
+* `pyside6` library by [Qt for Python](https://www.qt.io/qt-for-python).
