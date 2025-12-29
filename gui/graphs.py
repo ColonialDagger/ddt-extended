@@ -198,7 +198,7 @@ class DpsGraphCanvas(FigureCanvas):
         self.ax.set_title("")
 
         # Y ticks (autoscale will override)
-        self.ax.set_yticks([0])
+        self.ax.set_yticks([20, 40, 60, 80, 100])  # Large numbers prevent scaling bug on startup
         self.ax.tick_params(axis="y", length=0, labelsize=8, pad=-15, colors="#FFFFFF")
 
         # X ticks

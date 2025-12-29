@@ -98,14 +98,29 @@ class MainWindow(QMainWindow):
             # TODO Add protanopia
             # TODO Add tritanopia
         ])
+        self.colorblind_box.setToolTip(
+            "Select your in-game colorblind mode. This must match for the scanner to work properly."
+        )
         form.addRow("Colorblind mode:", self.colorblind_box)
 
         self.buffer_spin = QSpinBox()
         self.buffer_spin.setRange(1, 120)
         self.buffer_spin.setValue(10)
+        self.buffer_spin.setToolTip(
+            """<p style='white-space: normal;'>"""
+            "<b>Number of recent health samples to store.</b><br><br>"
+            "The scanner always reports the lowest value in the buffer (as health only goes down), "
+            "so drops in health appear instantly. "
+            "A larger buffer filters out noise but takes longer to return to an accurate value "
+            "after the health bar disappears (death, inventory, etc.)."
+            "</p>"
+        )
         form.addRow("Health Buffer:", self.buffer_spin)
 
         self.overlay_toggle = QCheckBox("Enable Overlay")
+        self.overlay_toggle.setToolTip(
+            "Toggle the on-screen overlay displaying live stats."
+        )
         form.addRow("", self.overlay_toggle)
 
         self.apply_button = QPushButton("Apply Settings")
