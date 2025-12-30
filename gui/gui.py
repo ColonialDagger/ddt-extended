@@ -203,12 +203,13 @@ class MainWindow(QMainWindow):
 
         :return:
         """
-
         if not self._scanner_ready or not self._scanner:
             self.health_label.setText("Health: --")
             self.fps_label.setText("FPS: --")
             self.delta_label.setText("Δt: --")
             return
+
+        print(self._scanner.get_phase_active())
 
         # Read scanner values
         health = self._scanner.get_health()
@@ -263,6 +264,7 @@ class MainWindow(QMainWindow):
                 f"Health: {health:.2f}%",
                 f"FPS: {fps:.1f}",
                 f"Δt: {delta * 1000:.2f} ms",
+                f"Phase active: {self._scanner.get_phase_active()}",
             ])
 
     def apply_settings(self):
