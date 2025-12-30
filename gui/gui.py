@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
     QPushButton, QSizePolicy, QCheckBox
 )
 
-from gui.graphs import HealthGraphWidget, DpsGraphWidget
+from gui.graphs import HealthGraphWidget, DpsGraphWidget, RollingDpsGraphWidget
 from gui.overlay import OverlayWindow
 import scanner
 
@@ -77,8 +77,12 @@ class MainWindow(QMainWindow):
         self.dps_canvas = DpsGraphWidget()
         self.dps_canvas.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
+        self.rolling_dps_canvas = RollingDpsGraphWidget()
+        self.rolling_dps_canvas.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
         graphs_layout.addWidget(self.health_canvas, 1)
         graphs_layout.addWidget(self.dps_canvas, 1)
+        graphs_layout.addWidget(self.rolling_dps_canvas, 1)
         graphs_group.setLayout(graphs_layout)
 
         left_panel.addWidget(stats_group)
@@ -209,8 +213,6 @@ class MainWindow(QMainWindow):
             self.delta_label.setText("Δt: --")
             return
 
-        print(self._scanner.get_phase_active())
-
         # Read scanner values
         health = self._scanner.get_health()
         fps = self._scanner.get_fps()
@@ -224,7 +226,7 @@ class MainWindow(QMainWindow):
         # Time base
         now = time.time() - self._t0
 
-        # Health Graph (H%/t)
+        # Live Health Graph (H%/t)
         self._health_times.append(now)
         self._health_values.append(health)
 
@@ -234,7 +236,7 @@ class MainWindow(QMainWindow):
 
         self.health_canvas.update_series(self._health_times, self._health_values)
 
-        # Derivative graph (dD%/dt)
+        # Live Derivative graph (dD%/dt)
         WINDOW = 0.25  # 250 ms  # TODO: Expose to user as a setting?
 
         # Find the earliest index within the window
@@ -257,6 +259,10 @@ class MainWindow(QMainWindow):
             self._dps_values = self._dps_values[-2000:]
 
         self.dps_canvas.update_series(self._dps_times, self._dps_values)
+
+        # Analytics Rolling DPS graph
+        times, dps = self._scanner.get_phase_series()
+        self.rolling_dps_canvas.update_series(times, dps)
 
         # OVERLAY
         if self.overlay:

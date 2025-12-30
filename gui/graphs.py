@@ -140,7 +140,69 @@ class DpsGraphWidget(QWidget):
 
         # Expand Y range only when needed
         d_max = max(trimmed_d)
-        if d_max > self._ymax:
-            self._ymax = d_max * 1.1
-            self.plot.setYRange(0, self._ymax, padding=0)
+        self.plot.setYRange(0, d_max * 1.1 if d_max > 0 else 1, padding=0)
+
+class RollingDpsGraphWidget(QWidget):
+    """
+    PyQtGraph widget for rolling DPS during a damage phase.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        self.plot = pg.PlotWidget(background="#1e1e1e")
+        layout.addWidget(self.plot)
+
+        # Style
+        self.plot.showGrid(x=True, y=True, alpha=0.25)
+        self.plot.setLabel("left", "Rolling DPS", color="white")
+        self.plot.setLabel("bottom", "Time (s)", color="white")
+        self.plot.setMouseEnabled(x=False, y=False)
+
+        # Axis styling
+        ax_left = self.plot.getAxis("left")
+        ax_left.setPen(pg.mkPen("white"))
+        ax_left.setTextPen(pg.mkPen("white"))
+
+        ax_bottom = self.plot.getAxis("bottom")
+        ax_bottom.setPen(pg.mkPen("white"))
+        ax_bottom.setTextPen(pg.mkPen("white"))
+
+        # Line + underfill
+        self.curve = self.plot.plot([], [], pen=pg.mkPen("yellow", width=2.5))
+        self.zero_curve = pg.PlotCurveItem([], [], pen=None)
+        self.fill = pg.FillBetweenItem(
+            self.curve,
+            self.zero_curve,
+            brush=pg.mkBrush(255, 255, 0, 60)
+        )
+        self.plot.addItem(self.fill)
+
+        # Y-axis dynamic expansion
+        self._ymax = 1
+
+        # Force initial view into the positive quadrant
+        self.plot.setXRange(0, 1, padding=0)
+        self.plot.setYRange(0, 1, padding=0)
+
+    def update_series(self, times, dps_values):
+        """
+        times: list of elapsed seconds since phase start
+        dps_values: list of rolling DPS values
+        """
+        if not times:
+            return
+
+        # Update line
+        self.curve.setData(times, dps_values)
+
+        # Underfill baseline
+        self.zero_curve.setData(times, [0] * len(times))
+
+        # Expand Y range only upward
+        d_max = max(dps_values)
+        self.plot.setYRange(0, d_max * 1.1 if d_max > 0 else 1, padding=0)
 
