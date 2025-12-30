@@ -152,6 +152,12 @@ class Scanner:
         self.phase_time_history = []  # elapsed seconds since phase start
         self.phase_dps_history = []  # DPS = total_damage / elapsed
 
+        # Health bar visibility + stabilization
+        self.health_visible = False
+        self._stabilizing_until = 0.0
+        self.HEALTH_VISIBILITY_THRESHOLD = 50  # minimum mask pixels to consider bar visible
+        self.STABILIZATION_TIME = 0.20  # seconds after bar reappears
+
         # Tunables for phase detection (in health fraction units: 0–1)
         self.PHASE_MIN_DAMAGE_FRACTION = 0.0005 # ~0.05% health
         self.PHASE_IDLE_TIMEOUT = 5.0 # seconds without damage -> phase ends
@@ -198,6 +204,7 @@ class Scanner:
                     # Crop to healthbar region, drop alpha
                     y1, y2, x1, x2 = self.y1, self.y2, self.x1, self.x2
                     cropped = frame.frame_buffer[y1:y2, x1:x2, :-1]
+                    self._last_cropped_img = cropped
 
                     raw_health_fraction = self._estimate_health(
                         cropped_img=cropped,
@@ -327,23 +334,51 @@ class Scanner:
 
     def _update_phase_state(self, now: float, prev_health: float, current_health: float) -> None:
         """
-        Updates phase state based on health changes.
-
-        :param now: float
-            Current time.
-        :param prev_health:
-            Previous health value.
-        :param current_health:
-            Current health value
-        :return: None
+        Robust phase detection with:
+        - health bar visibility detection
+        - stabilization window after reappearing
+        - no false phase starts from bar disappearing/reappearing
+        - no DPS spikes from 0→N or N→0 transitions
         """
-        damage = prev_health - current_health  # positive when boss loses health
 
-        # Ignore tiny noise
+        # 1. Determine if the health bar is visible
+        visible = self._is_health_bar_visible(
+            cropped_img=self._last_cropped_img,
+            neg_mask=self.neg_mask
+        )
+
+        # Bar disappeared → end phase immediately
+        if not visible:
+            # Bar disappeared
+            self.health_visible = False
+
+            # If a phase is active, KEEP IT ACTIVE
+            if self.phase_active:
+                # Do not update damage or end the phase
+                return
+
+            # If no phase is active, just reset tracking
+            self._last_health_fraction = None
+            return
+
+        # Bar just reappeared → start stabilization window
+        if visible and not self.health_visible:
+            self.health_visible = True
+            self._stabilizing_until = now + self.STABILIZATION_TIME
+            self._last_health_fraction = current_health
+            return
+
+        # Still stabilizing → ignore changes
+        if now < self._stabilizing_until:
+            self._last_health_fraction = current_health
+            return
+
+        # 2. Compute real damage
+        damage = prev_health - current_health
         if abs(damage) < 1e-6:
             damage = 0.0
 
-        # Phase start
+        # 3. Phase start
         if not self.phase_active and damage > self.PHASE_MIN_DAMAGE_FRACTION:
             self.phase_active = True
             self.phase_start_time = now
@@ -353,26 +388,45 @@ class Scanner:
             self.phase_dps_history.clear()
             return
 
-        # Phase continues
+        # 4. Phase continues
         if self.phase_active:
+
+            # Update last damage time
             if damage > self.PHASE_MIN_DAMAGE_FRACTION:
                 self.phase_last_damage_time = now
 
-            # Phase end
-            if self.phase_last_damage_time is not None and (now - self.phase_last_damage_time > self.PHASE_IDLE_TIMEOUT):
+            # Phase ends after idle timeout
+            if now - self.phase_last_damage_time > self.PHASE_IDLE_TIMEOUT:
                 self.phase_active = False
                 return
 
-            # Update DPS curve
-            if self.phase_start_time is not None and self.phase_start_health is not None:
+            # Update DPS curve only if bar is visible
+            if visible:
                 elapsed = now - self.phase_start_time
                 if elapsed > 0:
-                    total_damage = self.phase_start_health - current_health
-                    if total_damage < 0:
-                        total_damage = 0.0
+                    total_damage = max(0.0, self.phase_start_health - current_health)
                     dps = total_damage / elapsed
                     self.phase_time_history.append(elapsed)
                     self.phase_dps_history.append(dps)
+
+    def _is_health_bar_visible(self, cropped_img, neg_mask) -> bool:
+        """
+        Determines whether the health bar is visible based on mask pixel count
+        and basic sanity checks.
+        """
+        # Count mask pixels
+        mask_pixels = np.count_nonzero(neg_mask)
+
+        # If too few pixels, bar is not visible
+        if mask_pixels < self.HEALTH_VISIBILITY_THRESHOLD:
+            return False
+
+        # If the cropped region is extremely dark or bright, it's probably fading
+        mean_val = cropped_img.mean()
+        if mean_val < 5 or mean_val > 250:
+            return False
+
+        return True
 
     def _detect_window_resolution(self, timeout: float = 0.1) -> None:
         timeout = time.time() + timeout
