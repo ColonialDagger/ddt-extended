@@ -1,5 +1,5 @@
 import ctypes
-import scanner
+from scanner import scanner
 import threading
 import time
 
