@@ -217,7 +217,7 @@ class MainWindow(QMainWindow):
         # Read scanner values
         health = self._scanner.get_health()
         fps = self._scanner.get_fps()
-        delta = self._scanner.get_delta_t()
+        delta = self._scanner.get_dt()
 
         # Update labels
         self.health_label.setText(f"Health: {health:.2f}%")
@@ -229,7 +229,6 @@ class MainWindow(QMainWindow):
 
         # Live Health Graph (H%/t)
         self._health_times.append(now)
-        self._health_values.append(health)
 
         if len(self._health_times) > 2000:
             self._health_times = self._health_times[-2000:]
