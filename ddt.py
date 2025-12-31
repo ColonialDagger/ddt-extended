@@ -1,4 +1,5 @@
 import sys
+print("DDT STARTED", file=sys.stderr)
 
 from PySide6.QtWidgets import QApplication
 
@@ -12,4 +13,9 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        with open("error.log", "w") as f:
+            f.write(str(e))
+        print(f"An error occurred: {e}")

@@ -7,6 +7,17 @@ import numpy as np
 import numpy.exceptions
 from windows_capture import WindowsCapture, Frame, InternalCaptureControl
 
+from utils import utils
+
+try:
+    from scanner.gpu_pipeline import GPUPipeline
+except ModuleNotFoundError:  # Trips when running scanner.py as __main__
+    from gpu_pipeline import GPUPipeline
+
+# TODO Investigate moving to compute shaders
+# TODO Investigate using a LUT (Look-up Table) instead of a GMM calculation every frame
+# TODO Write __init__.py and make this a proper package
+
 class Scanner:
 
     # GMM-based color references per colorblind mode # TODO ADD OTHER COLORBLIND MODES
@@ -130,11 +141,28 @@ class Scanner:
 
         # Per-brightness GMM params
         self.color_reference = self.COLOR_REFS[colorblind_mode]  # TODO REPLACE WITH COLORBLIND MODE
+        # TODO DELETE THIS IF NOT NEEDED ANYMORE WITH LUTS & GPU DECLARED BELOW
 
         # Define mask for pixel capture
         negative = cv2.imread(f"negatives/{self.resolution[0]}x{self.resolution[1]}_negative.png")
         self.y1, self.y2, self.x1, self.x2 = self._grab_crop_dimensions(negative)
         self.neg_mask = self._grab_neg_mask(negative, self.y1, self.y2, self.x1, self.x2)
+
+        # GPU pipeline for health estimation
+        h = self.y2 - self.y1
+        w = self.x2 - self.x1
+        try:
+            self.gpu = GPUPipeline(
+                width=w,
+                height=h,
+                lut_path=f"luts/lut_{colorblind_mode}.bin",
+                shader_path="shaders/estimate_health_release.wgsl",
+                readback_interval=3  # TODO Tune this later if needed (increase is per-frame latency!)
+            )
+        except Exception as e:
+            with open("gpu_errors.log", "a") as f:
+                f.write(f"{time.asctime()}: {e}\n")
+            print("GPU pipeline initialization failed. See gpu_errors.log for details.")
 
         # Buffer that contains last x frames
         self.health_buffer = []
@@ -197,59 +225,73 @@ class Scanner:
                     The capture control object.
                 :return: None
                 """
-                try:
-                    # Keep a reference to the capture control so stop_capture() can call it
-                    self._capture_control = capture_control
+                # try:  # TODO Re-enable error handling
+                # Keep a reference to the capture control so stop_capture() can call it
+                self._capture_control = capture_control
 
-                    # Crop to healthbar region, drop alpha
-                    y1, y2, x1, x2 = self.y1, self.y2, self.x1, self.x2
-                    cropped = frame.frame_buffer[y1:y2, x1:x2, :-1]
-                    self._last_cropped_img = cropped
+                # Crop to healthbar region, drop alpha
+                y1, y2, x1, x2 = self.y1, self.y2, self.x1, self.x2
+                cropped = frame.frame_buffer[y1:y2, x1:x2, :-1]
+                self._last_cropped_img = cropped
 
-                    raw_health_fraction = self._estimate_health(
-                        cropped_img=cropped,
-                        neg_mask=self.neg_mask,
-                        color_reference=self.color_reference,
-                        min_col_fraction=0.60,  # TODO Try reducing this and see what happens. Consider Golden Gun, etc.
-                        edge_width=1
-                    )
+                t = time.time()  # TODO Remove benchmarking
+                raw_health_fraction = self._estimate_health(  # TODO REMOVE CPU VERSION THIS WHOLE BLOCK GOES BYE BYE
+                    cropped_img=cropped,
+                    neg_mask=self.neg_mask,
+                    color_reference=self.color_reference,
+                    min_col_fraction=0.60,  # TODO Try reducing this and see what happens. Consider Golden Gun, etc.
+                    edge_width=1
+                )
+                utils.list_to_csv([str(time.time() - t)], "health_estimate_time_cpu.csv")  # TODO Remove benchmarking
+                print("CPU mask nonzero:", int(np.count_nonzero(self.neg_mask)))
+                print(f"RAW HEALTH CPU: {raw_health_fraction}")
 
-                    # Keeps buffer at the specified size and reports minimum health in order to avoid artifacts like
-                    # Well or Golden Gun creating bad data. Health can only ever go down, so the minimum value in the buffer
-                    # is reported to ensure instant measurements for data while avoiding showing inflated data points.
-                    # Size is determined by health_buffer_size, which is a frame count.
-                    self.health_buffer.append(raw_health_fraction)
-                    if len(self.health_buffer) > self.health_buffer_size:
-                        self.health_buffer.pop(0)
-                    new_health_fraction = min(self.health_buffer)  # 0–1
+                t = time.time()  # TODO Remove benchmarking
+                raw_health_fraction = self.gpu.run(
+                    cropped_img=cropped,
+                    neg_mask=self.neg_mask,
+                    # min_col_fraction=0.60,  # TODO Try reducing this and see what happens. Consider Golden Gun, etc.
+                    # edge_width=1
+                )
+                utils.list_to_csv([str(time.time() - t)], "health_estimate_time_gpu.csv")  # TODO Remove benchmarking
+                print(f"RAW HEALTH GPU: {raw_health_fraction}")
 
-                    # Timing data
-                    now = time.time()
-                    self.delta_t = now - self.t_last
-                    self.t_last = now
+                # Keeps buffer at the specified size and reports minimum health in order to avoid artifacts like
+                # Well or Golden Gun creating bad data. Health can only ever go down, so the minimum value in the buffer
+                # is reported to ensure instant measurements for data while avoiding showing inflated data points.
+                # Size is determined by health_buffer_size, which is a frame count.
+                self.health_buffer.append(raw_health_fraction)
+                if len(self.health_buffer) > self.health_buffer_size:
+                    self.health_buffer.pop(0)
+                new_health_fraction = min(self.health_buffer)  # 0–1
 
-                    # Phase tracking update
-                    prev_fraction = self._last_health_fraction or new_health_fraction
-                    self._update_phase_state(now, prev_fraction, new_health_fraction)
-                    self._last_health_fraction = new_health_fraction
+                # Timing data
+                now = time.time()
+                self.delta_t = now - self.t_last
+                self.t_last = now
 
-                    # Publish health for external callers
-                    self.health = new_health_fraction
+                # Phase tracking update
+                prev_fraction = self._last_health_fraction or new_health_fraction
+                self._update_phase_state(now, prev_fraction, new_health_fraction)
+                self._last_health_fraction = new_health_fraction
 
-                    # Get brightest and darkest pixels over a runtime. Used to get color references for lookup table.
-                    if self.get_colors:
-                        self._get_darkest_and_brightest_pixels(cropped, neg_mask=self.neg_mask)
+                # Publish health for external callers
+                self.health = new_health_fraction
 
-                    # Sends pixel data to a CSV file. Used to determine color data
-                    if self.pixel_output:
-                        self._pixels_to_csv(self.pixel_output, cropped[self.neg_mask])
+                # Get brightest and darkest pixels over a runtime. Used to get color references for lookup table.
+                if self.get_colors:
+                    self._get_darkest_and_brightest_pixels(cropped, neg_mask=self.neg_mask)
 
-                    # Stop capture when requested
-                    if self._stop_requested:
-                        capture_control.stop()
+                # Sends pixel data to a CSV file. Used to determine color data
+                if self.pixel_output:
+                    self._pixels_to_csv(self.pixel_output, cropped[self.neg_mask])
 
-                except Exception as e:
-                    print("ERROR: ", e)
+                # Stop capture when requested
+                if self._stop_requested:
+                    capture_control.stop()
+
+                # except Exception as e:
+                #     print("ERROR: ", e)
 
             # Called when the capture item closes (usually when the window closes).
             @capture.event
@@ -722,13 +764,13 @@ def main():
         scanner_thread = threading.Thread(target=scanner_instance.start_capture, daemon=True)
         scanner_thread.start()
         while True:
-            print(
-                f"Health: {scanner_instance.get_health():9.6f}% | "
-                f"FPS: {scanner_instance.get_fps():7.2f} | "
-                f"Delta_T: {scanner_instance.get_delta_t()/1000:8.3} ms | "
-                f"Darkest: {scanner_instance.darkest} | "
-                f"Brightest: {scanner_instance.brightest}"
-            )
+            # print(
+            #     f"Health: {scanner_instance.get_health():9.6f}% | "
+            #     f"FPS: {scanner_instance.get_fps():7.2f} | "
+            #     f"Delta_T: {scanner_instance.get_delta_t()/1000:8.3} ms | "
+            #     f"Darkest: {scanner_instance.darkest} | "
+            #     f"Brightest: {scanner_instance.brightest}"
+            # )
             time.sleep(0.05)
 
     except KeyboardInterrupt:

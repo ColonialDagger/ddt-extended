@@ -1,7 +1,7 @@
 import threading
 import time
 
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import QTimer, Signal
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QGroupBox, QFormLayout, QComboBox, QSpinBox,
@@ -10,7 +10,8 @@ from PySide6.QtWidgets import (
 
 from gui.graphs import HealthGraphWidget, DpsGraphWidget, RollingDpsGraphWidget
 from gui.overlay import OverlayWindow
-import scanner
+from scanner import scanner
+
 
 class MainWindow(QMainWindow):
     """
