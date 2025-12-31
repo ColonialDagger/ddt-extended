@@ -2,12 +2,62 @@ import csv
 import cv2
 import time
 import threading
+from dataclasses import dataclass, field
 
 import numpy as np
 import numpy.exceptions
 from windows_capture import WindowsCapture, Frame, InternalCaptureControl
 
+
+@dataclass
+class PhaseState:
+    """
+    Holds phase state information.
+    """
+    active: bool = False
+    start_time: float | None = None
+    start_health: float | None = None
+    last_damage_time: float | None = None
+    time_history: list[float] = field(default_factory=list)
+    dps_history: list[float] = field(default_factory=list)
+
+
+@dataclass
+class VisibilityState:
+    """
+    Holds information regarding whether the boss bar is visible or not.
+    """
+    visible: bool = False
+    stabilizing_until: float = 0.0
+    threshold: int = 50
+    stabilization_time: float = 0.20
+
+
+@dataclass
+class HealthSmoothing:
+    """
+    Contains buffer to smooth data reporting.
+    """
+    buffer: list[float] = field(default_factory=list)
+    size: int = 10
+
+
+@dataclass
+class CaptureState:
+    """
+    Holds the capture agent of the health scanner.
+    """
+    stop_requested: bool = False
+    control: InternalCaptureControl | None = None
+    last_cropped_img: np.ndarray | None = None
+    last_time: float = field(default_factory=time.time)
+    delta_t: float = 1.0
+
+
 class Scanner:
+    """
+    Scans an active Destiny 2 window to report health of a given boss.
+    """
 
     # GMM-based color references per colorblind mode # TODO ADD OTHER COLORBLIND MODES
     COLOR_REFS = {
@@ -20,77 +70,32 @@ class Scanner:
                 0.24711283132072226
             ],
             "means": [
-                [
-                    133.5441455178054,
-                    181.89059444285843
-                ],
-                [
-                    135.98584483722124,
-                    196.51254339967718
-                ],
-                [
-                    125.16779106247647,
-                    187.96421651859083
-                ],
-                [
-                    148.47608609189092,
-                    188.98030424581918
-                ],
-                [
-                    121.54143205123121,
-                    176.06325135016425
-                ]
+                [133.5441455178054, 181.89059444285843],
+                [135.98584483722124, 196.51254339967718],
+                [125.16779106247647, 187.96421651859083],
+                [148.47608609189092, 188.98030424581918],
+                [121.54143205123121, 176.06325135016425]
             ],
             "prec_chol": [
                 [
-                    [
-                        0.20114274367899915,
-                        -0.06273333549278755
-                    ],
-                    [
-                        0.0,
-                        0.1996764419749202
-                    ]
+                    [0.20114274367899915, -0.06273333549278755],
+                    [0.0, 0.1996764419749202]
                 ],
                 [
-                    [
-                        0.17101809786486283,
-                        0.013458442044930635
-                    ],
-                    [
-                        0.0,
-                        0.2242104473695288
-                    ]
+                    [0.17101809786486283, 0.013458442044930635],
+                    [0.0, 0.2242104473695288]
                 ],
                 [
-                    [
-                        0.2086479253961739,
-                        -0.056672032915156434
-                    ],
-                    [
-                        0.0,
-                        0.21600544375427622
-                    ]
+                    [0.2086479253961739, -0.056672032915156434],
+                    [0.0, 0.21600544375427622]
                 ],
                 [
-                    [
-                        0.16914375754336217,
-                        0.012654298499640206
-                    ],
-                    [
-                        0.0,
-                        0.16801505026475905
-                    ]
+                    [0.16914375754336217, 0.012654298499640206],
+                    [0.0, 0.16801505026475905]
                 ],
                 [
-                    [
-                        0.2197256993491737,
-                        -0.004358987341711091
-                    ],
-                    [
-                        0.0,
-                        0.20008824112973111
-                    ]
+                    [0.2197256993491737, -0.004358987341711091],
+                    [0.0, 0.20008824112973111]
                 ]
             ],
             "log_dets": [
@@ -106,27 +111,24 @@ class Scanner:
 
     def __init__(
             self,
-            colorblind_mode : str = "normal",
-            health_buffer_size : int = 10,
-            window_name : str = "Destiny 2",
-            get_colors : bool = False,
-            pixel_output : str = None,
+            colorblind_mode: str = "normal",
+            health_buffer_size: int = 10,
+            window_name: str = "Destiny 2",
+            get_colors: bool = False,
+            pixel_output: str = None,
     ) -> None:
 
         self.window_name = window_name
-        self.t_last = time.time()
         self.pixel_output = pixel_output if pixel_output else None
 
         # Get resolution from Destiny 2 window
         self._detect_window_resolution()
 
-        self.health = 0  # Measured boss health (0–1)
-        self.delta_t = 1  # Time from frame capture to end of processing
+        # Measured boss health (0–1)
+        self.health = 0
 
         # Brightness related vars  # TODO Deprecate this or swap to CIELUV
         self.get_colors = get_colors
-        self.darkest = (255, 255, 255)
-        self.brightest = (0, 0, 0)
 
         # Per-brightness GMM params
         self.color_reference = self.COLOR_REFS[colorblind_mode]  # TODO REPLACE WITH COLORBLIND MODE
@@ -137,30 +139,21 @@ class Scanner:
         self.neg_mask = self._grab_neg_mask(negative, self.y1, self.y2, self.x1, self.x2)
 
         # Buffer that contains last x frames
-        self.health_buffer = []
-        self.health_buffer_size = health_buffer_size
+        self.smoothing = HealthSmoothing(size=health_buffer_size)
 
-        # Capture control flag
-        self._stop_requested = False  # Flag used to request the capture loop stop from other threads
+        # Capture control state
+        self.capture = CaptureState()
 
         # Phase tracking state
         self._last_health_fraction = None  # last health value in 0–1
-        self.phase_active = False
-        self.phase_start_time = None  # wall-clock time
-        self.phase_start_health = None  # health (0–1) at phase start
-        self.phase_last_damage_time = None
-        self.phase_time_history = []  # elapsed seconds since phase start
-        self.phase_dps_history = []  # DPS = total_damage / elapsed
+        self.phase = PhaseState()
 
         # Health bar visibility + stabilization
-        self.health_visible = False
-        self._stabilizing_until = 0.0
-        self.HEALTH_VISIBILITY_THRESHOLD = 50  # minimum mask pixels to consider bar visible
-        self.STABILIZATION_TIME = 0.20  # seconds after bar reappears
+        self.visibility = VisibilityState()
 
         # Tunables for phase detection (in health fraction units: 0–1)
-        self.PHASE_MIN_DAMAGE_FRACTION = 0.0005 # ~0.05% health
-        self.PHASE_IDLE_TIMEOUT = 5.0 # seconds without damage -> phase ends
+        self.PHASE_MIN_DAMAGE_FRACTION = 0.0005  # ~0.05% health
+        self.PHASE_IDLE_TIMEOUT = 5.0  # seconds without damage -> phase ends
 
     def start_capture(self) -> None:
         """
@@ -183,7 +176,7 @@ class Scanner:
 
             # Start capture in a separate thread so start_capture() returns immediately.
             # WindowsCapture.start() runs the capture loop internally; run it on a thread.
-            self._stop_requested = False
+            self.capture.stop_requested = False
 
             # called every time a new frame is available
             @capture.event
@@ -199,12 +192,12 @@ class Scanner:
                 """
                 try:
                     # Keep a reference to the capture control so stop_capture() can call it
-                    self._capture_control = capture_control
+                    self.capture.control = capture_control
 
                     # Crop to healthbar region, drop alpha
                     y1, y2, x1, x2 = self.y1, self.y2, self.x1, self.x2
                     cropped = frame.frame_buffer[y1:y2, x1:x2, :-1]
-                    self._last_cropped_img = cropped
+                    self.capture.last_cropped_img = cropped
 
                     raw_health_fraction = self._estimate_health(
                         cropped_img=cropped,
@@ -218,15 +211,16 @@ class Scanner:
                     # Well or Golden Gun creating bad data. Health can only ever go down, so the minimum value in the buffer
                     # is reported to ensure instant measurements for data while avoiding showing inflated data points.
                     # Size is determined by health_buffer_size, which is a frame count.
-                    self.health_buffer.append(raw_health_fraction)
-                    if len(self.health_buffer) > self.health_buffer_size:
-                        self.health_buffer.pop(0)
-                    new_health_fraction = min(self.health_buffer)  # 0–1
+                    buf = self.smoothing.buffer
+                    buf.append(raw_health_fraction)
+                    if len(buf) > self.smoothing.size:
+                        buf.pop(0)
+                    new_health_fraction = min(buf)  # 0–1
 
                     # Timing data
                     now = time.time()
-                    self.delta_t = now - self.t_last
-                    self.t_last = now
+                    self.capture.delta_t = now - self.capture.last_time
+                    self.capture.last_time = now
 
                     # Phase tracking update
                     prev_fraction = self._last_health_fraction or new_health_fraction
@@ -236,16 +230,12 @@ class Scanner:
                     # Publish health for external callers
                     self.health = new_health_fraction
 
-                    # Get brightest and darkest pixels over a runtime. Used to get color references for lookup table.
-                    if self.get_colors:
-                        self._get_darkest_and_brightest_pixels(cropped, neg_mask=self.neg_mask)
-
                     # Sends pixel data to a CSV file. Used to determine color data
                     if self.pixel_output:
                         self._pixels_to_csv(self.pixel_output, cropped[self.neg_mask])
 
                     # Stop capture when requested
-                    if self._stop_requested:
+                    if self.capture.stop_requested:
                         capture_control.stop()
 
                 except Exception as e:
@@ -276,7 +266,7 @@ class Scanner:
         # capture_control.stop() must be called from the capture thread (the handler),
         # we don't call it directly here unless we already have a capture_control and are
         # sure it's safe to call from another thread.
-        self._stop_requested = True
+        self.capture.stop_requested = True
 
     def get_health(self) -> float:
         """
@@ -294,7 +284,7 @@ class Scanner:
         :return: float
             Delta time of the calculation thread.
         """
-        return self.delta_t
+        return self.capture.delta_t
 
     def get_fps(self) -> float:
         """
@@ -304,7 +294,7 @@ class Scanner:
             FPS of the calculation thread.
         """
         try:
-            return 1 / self.delta_t
+            return 1 / self.capture.delta_t
         except ZeroDivisionError:
             return 9999
 
@@ -315,7 +305,7 @@ class Scanner:
         :return: bool
             State of phase.
         """
-        return self.phase_active
+        return self.phase.active
 
     def get_phase_series(self) -> tuple[list[float], list[float]]:
         """
@@ -325,12 +315,7 @@ class Scanner:
             times: list of elapsed seconds since phase start.
             dps: list of DPS values at those times.
         """
-        """
-        Returns (times, dps) for the current/most recent phase.
-        times: list of elapsed seconds since phase start.
-        dps:   list of DPS values at those times.
-        """
-        return list(self.phase_time_history), list(self.phase_dps_history)
+        return list(self.phase.time_history), list(self.phase.dps_history)
 
     def _update_phase_state(self, now: float, prev_health: float, current_health: float) -> None:
         """
@@ -343,17 +328,17 @@ class Scanner:
 
         # 1. Determine if the health bar is visible
         visible = self._is_health_bar_visible(
-            cropped_img=self._last_cropped_img,
+            cropped_img=self.capture.last_cropped_img,
             neg_mask=self.neg_mask
         )
 
         # Bar disappeared → end phase immediately
         if not visible:
             # Bar disappeared
-            self.health_visible = False
+            self.visibility.visible = False
 
             # If a phase is active, KEEP IT ACTIVE
-            if self.phase_active:
+            if self.phase.active:
                 # Do not update damage or end the phase
                 return
 
@@ -362,14 +347,14 @@ class Scanner:
             return
 
         # Bar just reappeared → start stabilization window
-        if visible and not self.health_visible:
-            self.health_visible = True
-            self._stabilizing_until = now + self.STABILIZATION_TIME
+        if visible and not self.visibility.visible:
+            self.visibility.visible = True
+            self.visibility.stabilizing_until = now + self.visibility.stabilization_time
             self._last_health_fraction = current_health
             return
 
         # Still stabilizing → ignore changes
-        if now < self._stabilizing_until:
+        if now < self.visibility.stabilizing_until:
             self._last_health_fraction = current_health
             return
 
@@ -379,35 +364,35 @@ class Scanner:
             damage = 0.0
 
         # 3. Phase start
-        if not self.phase_active and damage > self.PHASE_MIN_DAMAGE_FRACTION:
-            self.phase_active = True
-            self.phase_start_time = now
-            self.phase_start_health = prev_health
-            self.phase_last_damage_time = now
-            self.phase_time_history.clear()
-            self.phase_dps_history.clear()
+        if not self.phase.active and damage > self.PHASE_MIN_DAMAGE_FRACTION:
+            self.phase.active = True
+            self.phase.start_time = now
+            self.phase.start_health = prev_health
+            self.phase.last_damage_time = now
+            self.phase.time_history.clear()
+            self.phase.dps_history.clear()
             return
 
         # 4. Phase continues
-        if self.phase_active:
+        if self.phase.active:
 
             # Update last damage time
             if damage > self.PHASE_MIN_DAMAGE_FRACTION:
-                self.phase_last_damage_time = now
+                self.phase.last_damage_time = now
 
             # Phase ends after idle timeout
-            if now - self.phase_last_damage_time > self.PHASE_IDLE_TIMEOUT:
-                self.phase_active = False
+            if now - self.phase.last_damage_time > self.PHASE_IDLE_TIMEOUT:
+                self.phase.active = False
                 return
 
             # Update DPS curve only if bar is visible
             if visible:
-                elapsed = now - self.phase_start_time
+                elapsed = now - self.phase.start_time
                 if elapsed > 0:
-                    total_damage = max(0.0, self.phase_start_health - current_health)
+                    total_damage = max(0.0, self.phase.start_health - current_health)
                     dps = total_damage / elapsed
-                    self.phase_time_history.append(elapsed)
-                    self.phase_dps_history.append(dps)
+                    self.phase.time_history.append(elapsed)
+                    self.phase.dps_history.append(dps)
 
     def _is_health_bar_visible(self, cropped_img, neg_mask) -> bool:
         """
@@ -418,7 +403,7 @@ class Scanner:
         mask_pixels = np.count_nonzero(neg_mask)
 
         # If too few pixels, bar is not visible
-        if mask_pixels < self.HEALTH_VISIBILITY_THRESHOLD:
+        if mask_pixels < self.visibility.threshold:
             return False
 
         # If the cropped region is extremely dark or bright, it's probably fading
@@ -462,55 +447,6 @@ class Scanner:
 
         del self._searching  # Deletes var to avoid polluting outer scope
 
-    def _get_darkest_and_brightest_pixels(self, cropped_img, neg_mask=None):
-        """
-        Returns the darkest and brightest RGB pixels in the healthbar region
-
-        :param cropped_img: np.ndarray (H, W, 3)
-            The cropped healthbar image (RGB).
-        :param neg_mask: np.ndarray (H, W), optional
-            Negative mask indicating which pixels belong to the healthbar. If none, all pixels are scanned.
-        :return:
-        """
-
-        if neg_mask is not None:
-            # Flatten only masked pixels
-            mask_flat = neg_mask.ravel()
-            r = cropped_img[..., 0].ravel()[mask_flat]
-            g = cropped_img[..., 1].ravel()[mask_flat]
-            b = cropped_img[..., 2].ravel()[mask_flat]
-        else:
-            # Use all pixels
-            r = cropped_img[..., 0].ravel()
-            g = cropped_img[..., 1].ravel()
-            b = cropped_img[..., 2].ravel()
-
-        # Compute min/max per channel
-        try:
-            self.darkest = (
-                min([int(r.min()), self.darkest[0]]),
-                min([int(g.min()), self.darkest[1]]),
-                min([int(b.min()), self.darkest[2]])
-            )
-            self.brightest = (
-                max([int(r.max()), self.brightest[0]]),
-                max([int(g.max()), self.brightest[1]]),
-                max([int(b.max()), self.brightest[2]])
-            )
-        except AttributeError:
-            self.darkest = (
-                int(r.min()),
-                int(g.min()),
-                int(b.min())
-            )
-            self.brightest = (
-                int(r.max()),
-                int(g.max()),
-                int(b.max())
-            )
-
-        return self.darkest, self.brightest
-
     @staticmethod
     def _pixels_to_csv(path, pixels) -> None:
         with open(path, "a", newline="") as f:
@@ -519,7 +455,7 @@ class Scanner:
         print("Data saved to csv.")
 
     @staticmethod
-    def _grab_neg_mask(negative, health_y1:int, health_y2:int, health_x1:int, health_x2:int):
+    def _grab_neg_mask(negative, health_y1: int, health_y2: int, health_x1: int, health_x2: int):
         """
         Creates the negative mask for health estimation.
 
@@ -569,11 +505,11 @@ class Scanner:
 
     @staticmethod
     def _estimate_health(
-            cropped_img : np.ndarray,
-            neg_mask : np.ndarray,
-            color_reference : dict,
-            min_col_fraction : float = 0.60,
-            edge_width : int =2
+            cropped_img: np.ndarray,
+            neg_mask: np.ndarray,
+            color_reference: dict,
+            min_col_fraction: float = 0.60,
+            edge_width: int = 2
     ) -> float:
         """
         Hybrid health estimation for D2 boss health bars (right -> left scan).
@@ -725,9 +661,7 @@ def main():
             print(
                 f"Health: {scanner_instance.get_health():9.6f}% | "
                 f"FPS: {scanner_instance.get_fps():7.2f} | "
-                f"Delta_T: {scanner_instance.get_delta_t()/1000:8.3} ms | "
-                f"Darkest: {scanner_instance.darkest} | "
-                f"Brightest: {scanner_instance.brightest}"
+                f"Delta_T: {scanner_instance.get_delta_t()/1000:8.3} ms"
             )
             time.sleep(0.05)
 
@@ -735,6 +669,7 @@ def main():
         print("Stopping...")
         scanner_instance.stop_capture()
         exit(0)
+
 
 if __name__ == "__main__":
     main()
