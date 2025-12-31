@@ -1,3 +1,13 @@
+# ! WARNING !
+
+This is only a proof of concept of GPU accelerated health estimation. Significant portions of the code are AI generated, and need to be heavily reviewed.
+
+Problems include:
+
+* Refusal to run after compiling with Nuitka
+
+---
+
 # DDT Extended
 
 Destiny Damage Tracker Extended is a damage scanner utility for Destiny 2. DDT-ext tracks the health of a boss via the health bar, allowing for more accurate health readings.
