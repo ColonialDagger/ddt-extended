@@ -8,29 +8,9 @@ import numpy as np
 import numpy.exceptions
 from windows_capture import WindowsCapture, Frame, InternalCaptureControl
 
-
-@dataclass
-class PhaseState:
-    """
-    Holds phase state information.
-    """
-    active: bool = False
-    start_time: float | None = None
-    start_health: float | None = None
-    last_damage_time: float | None = None
-    time_history: list[float] = field(default_factory=list)
-    dps_history: list[float] = field(default_factory=list)
-
-
-@dataclass
-class VisibilityState:
-    """
-    Holds information regarding whether the boss bar is visible or not.
-    """
-    visible: bool = False
-    stabilizing_until: float = 0.0
-    threshold: int = 50
-    stabilization_time: float = 0.20
+from scanner.capture_engine import CaptureState, detect_window_resolution
+from scanner.health_estimator import estimate_health
+from scanner.phase_tracker import PhaseTracker
 
 
 @dataclass
@@ -40,18 +20,6 @@ class HealthSmoothing:
     """
     buffer: list[float] = field(default_factory=list)
     size: int = 10
-
-
-@dataclass
-class CaptureState:
-    """
-    Holds the capture agent of the health scanner.
-    """
-    stop_requested: bool = False
-    control: InternalCaptureControl | None = None
-    last_cropped_img: np.ndarray | None = None
-    last_time: float = field(default_factory=time.time)
-    delta_t: float = 1.0
 
 
 class Scanner:
@@ -122,7 +90,7 @@ class Scanner:
         self.pixel_output = pixel_output if pixel_output else None
 
         # Get resolution from Destiny 2 window
-        self._detect_window_resolution()
+        self.resolution = detect_window_resolution(self.window_name)
 
         # Measured boss health (0–1)
         self.health = 0
@@ -144,16 +112,11 @@ class Scanner:
         # Capture control state
         self.capture = CaptureState()
 
-        # Phase tracking state
-        self._last_health_fraction = None  # last health value in 0–1
-        self.phase = PhaseState()
-
-        # Health bar visibility + stabilization
-        self.visibility = VisibilityState()
-
-        # Tunables for phase detection (in health fraction units: 0–1)
-        self.PHASE_MIN_DAMAGE_FRACTION = 0.0005  # ~0.05% health
-        self.PHASE_IDLE_TIMEOUT = 5.0  # seconds without damage -> phase ends
+        # Phase tracking + visibility
+        self.phase_tracker = PhaseTracker(
+            min_damage_fraction=0.0005,   # ~0.05% health
+            idle_timeout=5.0              # seconds without damage -> phase ends
+        )
 
     def start_capture(self) -> None:
         """
@@ -199,7 +162,7 @@ class Scanner:
                     cropped = frame.frame_buffer[y1:y2, x1:x2, :-1]
                     self.capture.last_cropped_img = cropped
 
-                    raw_health_fraction = self._estimate_health(
+                    raw_health_fraction = estimate_health(
                         cropped_img=cropped,
                         neg_mask=self.neg_mask,
                         color_reference=self.color_reference,
@@ -222,10 +185,13 @@ class Scanner:
                     self.capture.delta_t = now - self.capture.last_time
                     self.capture.last_time = now
 
-                    # Phase tracking update
-                    prev_fraction = self._last_health_fraction or new_health_fraction
-                    self._update_phase_state(now, prev_fraction, new_health_fraction)
-                    self._last_health_fraction = new_health_fraction
+                    # Phase tracking update (includes visibility)
+                    self.phase_tracker.update(
+                        now=now,
+                        current_health=new_health_fraction,
+                        cropped_img=cropped,
+                        neg_mask=self.neg_mask
+                    )
 
                     # Publish health for external callers
                     self.health = new_health_fraction
@@ -305,7 +271,7 @@ class Scanner:
         :return: bool
             State of phase.
         """
-        return self.phase.active
+        return self.phase_tracker.state.active
 
     def get_phase_series(self) -> tuple[list[float], list[float]]:
         """
@@ -315,137 +281,7 @@ class Scanner:
             times: list of elapsed seconds since phase start.
             dps: list of DPS values at those times.
         """
-        return list(self.phase.time_history), list(self.phase.dps_history)
-
-    def _update_phase_state(self, now: float, prev_health: float, current_health: float) -> None:
-        """
-        Robust phase detection with:
-        - health bar visibility detection
-        - stabilization window after reappearing
-        - no false phase starts from bar disappearing/reappearing
-        - no DPS spikes from 0→N or N→0 transitions
-        """
-
-        # 1. Determine if the health bar is visible
-        visible = self._is_health_bar_visible(
-            cropped_img=self.capture.last_cropped_img,
-            neg_mask=self.neg_mask
-        )
-
-        # Bar disappeared → end phase immediately
-        if not visible:
-            # Bar disappeared
-            self.visibility.visible = False
-
-            # If a phase is active, KEEP IT ACTIVE
-            if self.phase.active:
-                # Do not update damage or end the phase
-                return
-
-            # If no phase is active, just reset tracking
-            self._last_health_fraction = None
-            return
-
-        # Bar just reappeared → start stabilization window
-        if visible and not self.visibility.visible:
-            self.visibility.visible = True
-            self.visibility.stabilizing_until = now + self.visibility.stabilization_time
-            self._last_health_fraction = current_health
-            return
-
-        # Still stabilizing → ignore changes
-        if now < self.visibility.stabilizing_until:
-            self._last_health_fraction = current_health
-            return
-
-        # 2. Compute real damage
-        damage = prev_health - current_health
-        if abs(damage) < 1e-6:
-            damage = 0.0
-
-        # 3. Phase start
-        if not self.phase.active and damage > self.PHASE_MIN_DAMAGE_FRACTION:
-            self.phase.active = True
-            self.phase.start_time = now
-            self.phase.start_health = prev_health
-            self.phase.last_damage_time = now
-            self.phase.time_history.clear()
-            self.phase.dps_history.clear()
-            return
-
-        # 4. Phase continues
-        if self.phase.active:
-
-            # Update last damage time
-            if damage > self.PHASE_MIN_DAMAGE_FRACTION:
-                self.phase.last_damage_time = now
-
-            # Phase ends after idle timeout
-            if now - self.phase.last_damage_time > self.PHASE_IDLE_TIMEOUT:
-                self.phase.active = False
-                return
-
-            # Update DPS curve only if bar is visible
-            if visible:
-                elapsed = now - self.phase.start_time
-                if elapsed > 0:
-                    total_damage = max(0.0, self.phase.start_health - current_health)
-                    dps = total_damage / elapsed
-                    self.phase.time_history.append(elapsed)
-                    self.phase.dps_history.append(dps)
-
-    def _is_health_bar_visible(self, cropped_img, neg_mask) -> bool:
-        """
-        Determines whether the health bar is visible based on mask pixel count
-        and basic sanity checks.
-        """
-        # Count mask pixels
-        mask_pixels = np.count_nonzero(neg_mask)
-
-        # If too few pixels, bar is not visible
-        if mask_pixels < self.visibility.threshold:
-            return False
-
-        # If the cropped region is extremely dark or bright, it's probably fading
-        mean_val = cropped_img.mean()
-        if mean_val < 5 or mean_val > 250:
-            return False
-
-        return True
-
-    def _detect_window_resolution(self, timeout: float = 0.1) -> None:
-        timeout = time.time() + timeout
-        self._searching = True
-        while self._searching:
-            try:
-                # Every Error From on_closed and on_frame_arrived Will End Up Here
-                capture = WindowsCapture(
-                    cursor_capture=False,
-                    draw_border=False,
-                    monitor_index=None,
-                    window_name=self.window_name,
-                )
-
-                # Called Every Time A New Frame Is Available
-                @capture.event
-                def on_frame_arrived(frame: Frame, capture_control: InternalCaptureControl):
-                    h, w = frame.frame_buffer.shape[:2]
-                    self.resolution = (w, h)
-                    self._searching = False
-                    capture_control.stop()
-
-                # Called When The Capture Item Closes Usually When The Window Closes, Capture
-                # Session Will End After This Function Ends
-                @capture.event
-                def on_closed():
-                    raise RuntimeError("Window closed while determining resolution")
-
-                capture.start()
-            except:  # Always pass, true limiter is the timeout
-                if time.time() > timeout:
-                    raise TimeoutError("Timed out while determining window resolution")
-
-        del self._searching  # Deletes var to avoid polluting outer scope
+        return list(self.phase_tracker.state.time_history), list(self.phase_tracker.state.dps_history)
 
     @staticmethod
     def _pixels_to_csv(path, pixels) -> None:
@@ -502,150 +338,6 @@ class Scanner:
         right = xs.max()
 
         return top, bottom, left, right
-
-    @staticmethod
-    def _estimate_health(
-            cropped_img: np.ndarray,
-            neg_mask: np.ndarray,
-            color_reference: dict,
-            min_col_fraction: float = 0.60,
-            edge_width: int = 2
-    ) -> float:
-        """
-        Hybrid health estimation for D2 boss health bars (right -> left scan).
-
-        Core idea:
-
-        - The active health bar is always the rightmost column (normal health first, then Final Stand(s)).
-
-        - We scan from right to left and find the first column that is "full enough" as per a given threshold.
-
-        - All columns before that point (to the left) are assumed fully healthy.
-
-        - Around the detected edge, perform refine pixel-by-pixel scanning to count health and not health pixels.
-
-        - Add the count of scanned healthy pixels near the detected edge to the count of assumed health pixels.
-
-        :param cropped_img: np.ndarray (H, W, 3)
-            A cropped image of the D2 health bar only.
-        :param neg_mask: np.ndarray (H, W, 3)
-            A pre-specified negative mask of the same size as cropped_img
-        :param dark: tuple(int, int, int)
-            The dark most allowable pixel
-        :param light: tuple(int, int, int)
-            The light most allowable pixel
-        :param min_col_fraction: float
-            The minimum number of pixels in a col. to be "healthy" before scanning the next col.
-        :param edge_width: int
-            The width from the last healthy column that should be scanned in each direction.
-        :return:
-        """
-
-        h, w, _ = cropped_img.shape
-
-        # Convert to LUV
-        luv = cv2.cvtColor(cropped_img, cv2.COLOR_BGR2LUV).astype(np.float32)
-
-        # Extract u*, v* only
-        u = luv[..., 1]
-        v = luv[..., 2]
-
-        # TODO micro-optimization: flip bar vertically since it curves down -> less checks when it goes col by col?
-
-        # Pass u, v into the GMM
-        gmm_mask = Scanner._gmm_mask(color_reference, u, v)
-
-        # Healthy = in-range AND inside mask
-        healthy_mask = np.bitwise_and(gmm_mask, neg_mask)
-
-        # Step 1: Vectorized column counts
-        mask_counts = np.count_nonzero(neg_mask, axis=0)
-        healthy_counts = np.count_nonzero(healthy_mask, axis=0)
-
-        # Precompute thresholds
-        thresholds = mask_counts * min_col_fraction
-
-        # Local bindings for speed
-        hc = healthy_counts
-        thr = thresholds
-        mc = mask_counts
-
-        # Step 1.1: Fast full-health early exit
-        last_col = w - 1
-        if mc[last_col] > 0 and hc[last_col] >= thr[last_col]:
-            first_full_col = last_col
-        else:
-            # Step 1.2: Scan right → left for first full column
-            first_full_col = -1
-            for col in range(last_col, -1, -1):
-                if mc[col] == 0:
-                    continue
-                if hc[col] >= thr[col]:
-                    first_full_col = col
-                    break
-
-        # Step 1.5: Fallback if no full column found
-        if first_full_col < 0:
-            total = mc[last_col]
-            if total == 0:
-                return 0.0
-            return hc[last_col] / total
-
-        # Step 2: Count all mask pixels BEFORE the first full column
-        if first_full_col > 0:
-            full_columns_count = mc[:first_full_col].sum()
-        else:
-            full_columns_count = 0
-
-        # Step 3: Pixel-level refinement around the edge
-        edge_start = max(0, first_full_col - edge_width)
-        edge_end = min(w, first_full_col + edge_width + 1)
-
-        edge_healthy = hc[edge_start:edge_end].sum()
-
-        # Step 4: Combine counts
-        total_bar_pixels = mc.sum()
-        total_healthy = full_columns_count + edge_healthy
-
-        health_fraction = total_healthy / total_bar_pixels
-        return min(1.0, max(0.0, health_fraction))
-
-    @staticmethod
-    def _gmm_mask(ref, c0, c1):
-        """
-        Vectorized GMM classifier for 2‑channel input (u*, v*).
-        """
-
-        # Stack into (H, W, 2)
-        x = np.stack([c0, c1], axis=-1).astype(np.float64)
-
-        weights = np.asarray(ref["weights"], dtype=np.float64)
-        means = np.asarray(ref["means"], dtype=np.float64)
-        prec_chol = np.asarray(ref["prec_chol"], dtype=np.float64)
-        log_dets = np.asarray(ref["log_dets"], dtype=np.float64)
-        threshold = float(ref["threshold"])
-
-        log_prob = np.full(x.shape[:2], -np.inf, dtype=np.float64)
-
-        for w, mu, L, log_det in zip(weights, means, prec_chol, log_dets):
-            diff = x - mu  # (H, W, 2)
-
-            # 2D Cholesky transform
-            y0 = L[0, 0] * diff[..., 0] + L[0, 1] * diff[..., 1]
-            y1 = L[1, 0] * diff[..., 0] + L[1, 1] * diff[..., 1]
-
-            md = y0 * y0 + y1 * y1
-
-            lp = (
-                    -0.5 * md
-                    + np.log(w)
-                    - 1.0 * np.log(2 * np.pi)  # 2D Gaussian → -1 * log(2π)
-                    + log_det
-            )
-
-            log_prob = np.logaddexp(log_prob, lp)
-
-        return log_prob >= threshold
 
 
 def main():
