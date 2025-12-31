@@ -103,8 +103,8 @@ class Scanner:
 
         # Define mask for pixel capture
         negative = cv2.imread(f"negatives/{self.resolution[0]}x{self.resolution[1]}_negative.png")
-        self.y1, self.y2, self.x1, self.x2 = self._grab_crop_dimensions(negative)
-        self.neg_mask = self._grab_neg_mask(negative, self.y1, self.y2, self.x1, self.x2)
+        self.y1, self.y2, self.x1, self.x2 = self._crop_dimensions_from_image(negative)
+        self.neg_mask = self._crop_neg_mask(negative, self.y1, self.y2, self.x1, self.x2)
 
         # Buffer that contains last x frames
         self.smoothing = HealthSmoothing(size=health_buffer_size)
@@ -118,6 +118,10 @@ class Scanner:
             idle_timeout=5.0              # seconds without damage -> phase ends
         )
 
+        # Time tracking
+        self.last_t = time.time()
+        self.dt = 0
+
     def start_capture(self) -> None:
         """
         Starts the capture session using the Windows Graphics Capture API. This is its own threaded process that will
@@ -125,6 +129,8 @@ class Scanner:
 
         Don't touch anything here. This is a black hole that I got working and won't touch unless you absolutely
         have to. Every time I touch something, it breaks again.
+
+        This is not in scanner/capture_engine.py due to function callbacks causing much higher process times.
 
         :return: None
         """
@@ -157,48 +163,7 @@ class Scanner:
                     # Keep a reference to the capture control so stop_capture() can call it
                     self.capture.control = capture_control
 
-                    # Crop to healthbar region, drop alpha
-                    y1, y2, x1, x2 = self.y1, self.y2, self.x1, self.x2
-                    cropped = frame.frame_buffer[y1:y2, x1:x2, :-1]
-                    self.capture.last_cropped_img = cropped
-
-                    raw_health_fraction = estimate_health(
-                        cropped_img=cropped,
-                        neg_mask=self.neg_mask,
-                        color_reference=self.color_reference,
-                        min_col_fraction=0.60,  # TODO Try reducing this and see what happens. Consider Golden Gun, etc.
-                        edge_width=1
-                    )
-
-                    # Keeps buffer at the specified size and reports minimum health in order to avoid artifacts like
-                    # Well or Golden Gun creating bad data. Health can only ever go down, so the minimum value in the buffer
-                    # is reported to ensure instant measurements for data while avoiding showing inflated data points.
-                    # Size is determined by health_buffer_size, which is a frame count.
-                    buf = self.smoothing.buffer
-                    buf.append(raw_health_fraction)
-                    if len(buf) > self.smoothing.size:
-                        buf.pop(0)
-                    new_health_fraction = min(buf)  # 0–1
-
-                    # Timing data
-                    now = time.time()
-                    self.capture.delta_t = now - self.capture.last_time
-                    self.capture.last_time = now
-
-                    # Phase tracking update (includes visibility)
-                    self.phase_tracker.update(
-                        now=now,
-                        current_health=new_health_fraction,
-                        cropped_img=cropped,
-                        neg_mask=self.neg_mask
-                    )
-
-                    # Publish health for external callers
-                    self.health = new_health_fraction
-
-                    # Sends pixel data to a CSV file. Used to determine color data
-                    if self.pixel_output:
-                        self._pixels_to_csv(self.pixel_output, cropped[self.neg_mask])
+                    self._process_frame(frame)
 
                     # Stop capture when requested
                     if self.capture.stop_requested:
@@ -283,6 +248,53 @@ class Scanner:
         """
         return list(self.phase_tracker.state.time_history), list(self.phase_tracker.state.dps_history)
 
+    def _process_frame(self, frame):
+
+        # Crop to healthbar region, drop alpha
+        y1, y2, x1, x2 = self.y1, self.y2, self.x1, self.x2
+        cropped = frame.frame_buffer[y1:y2, x1:x2, :-1]
+        self.capture.last_cropped_img = cropped
+
+        raw_health_fraction = estimate_health(
+            cropped_img=cropped,
+            neg_mask=self.neg_mask,
+            color_reference=self.color_reference,
+            min_col_fraction=0.60,  # TODO Try reducing this and see what happens. Consider Golden Gun, etc.
+            edge_width=1
+        )
+
+        # Keeps buffer at the specified size and reports minimum health in order to avoid artifacts like
+        # Well or Golden Gun creating bad data. Health can only ever go down, so the minimum value in the buffer
+        # is reported to ensure instant measurements for data while avoiding showing inflated data points.
+        # Size is determined by health_buffer_size, which is a frame count.
+        buf = self.smoothing.buffer
+        buf.append(raw_health_fraction)
+        if len(buf) > self.smoothing.size:
+            buf.pop(0)
+        new_health_fraction = min(buf)  # 0–1
+
+        # Timing data
+        now = time.time()
+        self.dt = now - self.last_t
+        self.last_t = now
+
+        # Phase tracking update (includes visibility)
+        self.phase_tracker.update(
+            now=now,
+            current_health=new_health_fraction,
+            cropped_img=cropped,
+            neg_mask=self.neg_mask
+        )
+
+        # Publish health for external callers
+        self.health = new_health_fraction
+
+        # Sends pixel data to a CSV file. Used to determine color data
+        if self.pixel_output:
+            self._pixels_to_csv(self.pixel_output, cropped[self.neg_mask])
+
+        return
+
     @staticmethod
     def _pixels_to_csv(path, pixels) -> None:
         with open(path, "a", newline="") as f:
@@ -291,7 +303,7 @@ class Scanner:
         print("Data saved to csv.")
 
     @staticmethod
-    def _grab_neg_mask(negative, health_y1: int, health_y2: int, health_x1: int, health_x2: int):
+    def _crop_neg_mask(negative, health_y1: int, health_y2: int, health_x1: int, health_x2: int):
         """
         Creates the negative mask for health estimation.
 
@@ -313,7 +325,7 @@ class Scanner:
         return neg_mask
 
     @staticmethod
-    def _grab_crop_dimensions(negative) -> tuple[int, int, int, int]:
+    def _crop_dimensions_from_image(negative) -> tuple[int, int, int, int]:
         """
         Grabs the crop dimensions of a negative mask.
 

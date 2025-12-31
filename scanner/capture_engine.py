@@ -9,11 +9,13 @@ from windows_capture import WindowsCapture, Frame, InternalCaptureControl
 class CaptureState:
     """
     Holds the capture agent of the health scanner.
+
+    Does not hold the actual start/stop capture functions which are located in scanner/scanner.py for optimization.
+    See scanner.Scanner.start_capture() for more details.
     """
     stop_requested: bool = False
     control: InternalCaptureControl | None = None
     last_cropped_img: Any | None = None
-    last_time: float = field(default_factory=time.time)
     delta_t: float = 1.0
 
 

@@ -1,7 +1,7 @@
 import cv2
 import numpy as np
 
-def _gmm_mask(ref, c0, c1):
+def _gmm_mask_from_params(ref, c0, c1):
     """
     Vectorized GMM classifier for 2‑channel input (u*, v*).
     """
@@ -87,7 +87,7 @@ def estimate_health(
     # TODO micro-optimization: flip bar vertically since it curves down -> less checks when it goes col by col?
 
     # Pass u, v into the GMM
-    gmm_mask = _gmm_mask(color_reference, u, v)
+    gmm_mask = _gmm_mask_from_params(color_reference, u, v)
 
     # Healthy = in-range AND inside mask
     healthy_mask = np.bitwise_and(gmm_mask, neg_mask)
