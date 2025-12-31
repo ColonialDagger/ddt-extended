@@ -106,6 +106,12 @@ class Scanner:
         self.y1, self.y2, self.x1, self.x2 = self._crop_dimensions_from_image(negative)
         self.neg_mask = self._crop_neg_mask(negative, self.y1, self.y2, self.x1, self.x2)
 
+        # Precompute mask pixel counts (per column) and flattened mask indices
+        ys, xs = np.where(self.neg_mask)
+        self.mask_indices = (ys, xs)  # flattened mask coordinates
+        self.mask_col_ids = xs  # column index for each mask pixel
+        self.mask_counts = np.bincount(xs, minlength=self.neg_mask.shape[1])
+
         # Buffer that contains last x frames
         self.smoothing = HealthSmoothing(size=health_buffer_size)
 
@@ -208,14 +214,14 @@ class Scanner:
         """
         return 100 * self.health
 
-    def get_delta_t(self) -> float:
+    def get_dt(self) -> float:
         """
         Returns the last measured delta time of the calculation thread.
 
         :return: float
             Delta time of the calculation thread.
         """
-        return self.capture.delta_t
+        return self.dt
 
     def get_fps(self) -> float:
         """
@@ -225,7 +231,7 @@ class Scanner:
             FPS of the calculation thread.
         """
         try:
-            return 1 / self.capture.delta_t
+            return 1 / self.dt
         except ZeroDivisionError:
             return 9999
 
@@ -258,6 +264,9 @@ class Scanner:
         raw_health_fraction = estimate_health(
             cropped_img=cropped,
             neg_mask=self.neg_mask,
+            mask_indices=self.mask_indices,
+            mask_col_ids=self.mask_col_ids,
+            mask_counts=self.mask_counts,
             color_reference=self.color_reference,
             min_col_fraction=0.60,  # TODO Try reducing this and see what happens. Consider Golden Gun, etc.
             edge_width=1
@@ -365,7 +374,7 @@ def main():
             print(
                 f"Health: {scanner_instance.get_health():9.6f}% | "
                 f"FPS: {scanner_instance.get_fps():7.2f} | "
-                f"Delta_T: {scanner_instance.get_delta_t()/1000:8.3} ms"
+                f"Delta_T: {scanner_instance.get_dt() / 1000:8.3} ms"
             )
             time.sleep(0.05)
 

@@ -1,6 +1,7 @@
 import cv2
 import numpy as np
 
+
 def _gmm_mask_from_params(ref, c0, c1):
     """
     Vectorized GMM classifier for 2‑channel input (u*, v*).
@@ -27,10 +28,10 @@ def _gmm_mask_from_params(ref, c0, c1):
         md = y0 * y0 + y1 * y1
 
         lp = (
-                -0.5 * md
-                + np.log(w)
-                - 1.0 * np.log(2 * np.pi)  # 2D Gaussian → -1 * log(2π)
-                + log_det
+            -0.5 * md
+            + np.log(w)
+            - 1.0 * np.log(2 * np.pi)  # 2D Gaussian → -1 * log(2π)
+            + log_det
         )
 
         log_prob = np.logaddexp(log_prob, lp)
@@ -41,6 +42,9 @@ def _gmm_mask_from_params(ref, c0, c1):
 def estimate_health(
         cropped_img,
         neg_mask,
+        mask_indices,
+        mask_col_ids,
+        mask_counts,
         color_reference: dict,
         min_col_fraction: float = 0.60,
         edge_width: int = 2
@@ -62,12 +66,14 @@ def estimate_health(
 
     :param cropped_img: np.ndarray (H, W, 3)
         A cropped image of the D2 health bar only.
-    :param neg_mask: np.ndarray (H, W, 3)
-        A pre-specified negative mask of the same size as cropped_img
-    :param dark: tuple(int, int, int)
-        The dark most allowable pixel
-    :param light: tuple(int, int, int)
-        The light most allowable pixel
+    :param neg_mask: np.ndarray (H, W)
+        Boolean mask of valid health bar pixels.
+    :param mask_indices: tuple(np.ndarray, np.ndarray)
+        Precomputed (ys, xs) for all True pixels in neg_mask.
+    :param mask_col_ids: np.ndarray
+        Column index for each mask pixel (same length as mask_indices[0]).
+    :param mask_counts: np.ndarray
+        Precomputed number of mask pixels per column.
     :param min_col_fraction: float
         The minimum number of pixels in a col. to be "healthy" before scanning the next col.
     :param edge_width: int
@@ -84,17 +90,20 @@ def estimate_health(
     u = luv[..., 1]
     v = luv[..., 2]
 
-    # TODO micro-optimization: flip bar vertically since it curves down -> less checks when it goes col by col?
-
     # Pass u, v into the GMM
     gmm_mask = _gmm_mask_from_params(color_reference, u, v)
 
     # Healthy = in-range AND inside mask
-    healthy_mask = np.bitwise_and(gmm_mask, neg_mask)
+    # Instead of scanning the whole 2D array, index only mask pixels
+    ys, xs = mask_indices
+    healthy_flat = gmm_mask[ys, xs]
 
-    # Step 1: Vectorized column counts
-    mask_counts = np.count_nonzero(neg_mask, axis=0)
-    healthy_counts = np.count_nonzero(healthy_mask, axis=0)
+    # Count healthy pixels per column using bincount
+    healthy_counts = np.bincount(
+        mask_col_ids,
+        weights=healthy_flat.astype(np.int32),
+        minlength=w
+    )
 
     # Precompute thresholds
     thresholds = mask_counts * min_col_fraction

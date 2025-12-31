@@ -54,7 +54,7 @@ class ScannerThread(QObject):
         while self._running:
             health = self._scanner.get_health()
             fps = self._scanner.get_fps()
-            delta = self._scanner.get_delta_t()
+            delta = self._scanner.get_dt()
 
             if health is not None:
                 self.health_changed.emit(health)
