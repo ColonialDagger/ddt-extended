@@ -1,56 +1,46 @@
 import cv2
 import numpy as np
 
+class HealthReference:
+    neg_mask : np.ndarray = None
+    mask_indices = None
+    mask_col_ids = None
+    mask_counts = None
+    lut = None
 
-def _gmm_mask_from_params(ref, c0, c1):
+def _gpu_uv_to_index(u_star: np.ndarray, v_star: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """
-    Vectorized GMM classifier for 2‑channel input (u*, v*).
+    Maps (u*, v*) → [0,255] UV-index space used by the GPU shader. This will match future compute shaders, assuming I
+    can ever get compilation to work for it.
+
+    Args:
+        u_star: array of u* values.
+        v_star: array of v* values.
+
+    Returns:
+        (u_idx, v_idx): uint8 arrays in [0,255].
     """
+    # These ranges must match the GPU WGSL shader
+    u_min, u_max = -200.0, 300.0
+    v_min, v_max = -200.0, 300.0
 
-    # Stack into (H, W, 2)
-    x = np.stack([c0, c1], axis=-1).astype(np.float64)
+    u_norm = np.clip((u_star - u_min) / (u_max - u_min), 0.0, 1.0)
+    v_norm = np.clip((v_star - v_min) / (v_max - v_min), 0.0, 1.0)
 
-    weights = np.asarray(ref["weights"], dtype=np.float64)
-    means = np.asarray(ref["means"], dtype=np.float64)
-    prec_chol = np.asarray(ref["prec_chol"], dtype=np.float64)
-    log_dets = np.asarray(ref["log_dets"], dtype=np.float64)
-    threshold = float(ref["threshold"])
-
-    log_prob = np.full(x.shape[:2], -np.inf, dtype=np.float64)
-
-    for w, mu, L, log_det in zip(weights, means, prec_chol, log_dets):
-        diff = x - mu  # (H, W, 2)
-
-        # 2D Cholesky transform
-        y0 = L[0, 0] * diff[..., 0] + L[0, 1] * diff[..., 1]
-        y1 = L[1, 0] * diff[..., 0] + L[1, 1] * diff[..., 1]
-
-        md = y0 * y0 + y1 * y1
-
-        lp = (
-            -0.5 * md
-            + np.log(w)
-            - 1.0 * np.log(2 * np.pi)  # 2D Gaussian → -1 * log(2π)
-            + log_det
-        )
-
-        log_prob = np.logaddexp(log_prob, lp)
-
-    return log_prob >= threshold
+    return (u_norm * 255.0).astype(np.uint8), (v_norm * 255.0).astype(np.uint8)
 
 
 def estimate_health(
         cropped_img,
-        neg_mask,
-        mask_indices,
-        mask_col_ids,
-        mask_counts,
-        color_reference: dict,
+        ref,
         min_col_fraction: float = 0.60,
         edge_width: int = 2
 ) -> float:
     """
     Hybrid health estimation for D2 boss health bars (right -> left scan).
+
+    This LUT-powered version replaces the GMM classifier entirely.
+    Classification is now a single LUT lookup per pixel, matching the GPU shader.
 
     Core idea:
 
@@ -66,14 +56,8 @@ def estimate_health(
 
     :param cropped_img: np.ndarray (H, W, 3)
         A cropped image of the D2 health bar only.
-    :param neg_mask: np.ndarray (H, W)
-        Boolean mask of valid health bar pixels.
-    :param mask_indices: tuple(np.ndarray, np.ndarray)
-        Precomputed (ys, xs) for all True pixels in neg_mask.
-    :param mask_col_ids: np.ndarray
-        Column index for each mask pixel (same length as mask_indices[0]).
-    :param mask_counts: np.ndarray
-        Precomputed number of mask pixels per column.
+    :param ref: HealthReference
+        Contains reference data for health estimation. This is generated every time the scanner initializes.
     :param min_col_fraction: float
         The minimum number of pixels in a col. to be "healthy" before scanning the next col.
     :param edge_width: int
@@ -85,33 +69,36 @@ def estimate_health(
 
     # Convert to LUV
     luv = cv2.cvtColor(cropped_img, cv2.COLOR_BGR2LUV).astype(np.float32)
+    u_star = luv[..., 1]
+    v_star = luv[..., 2]
 
-    # Extract u*, v* only
-    u = luv[..., 1]
-    v = luv[..., 2]
+    # Map to UV-index space
+    u_idx, v_idx = _gpu_uv_to_index(u_star, v_star)
 
-    # Pass u, v into the GMM
-    gmm_mask = _gmm_mask_from_params(color_reference, u, v)
+    # LUT classification
+    lut_mask = ref.lut[u_idx, v_idx]          # shape (H, W), values 0 or 1
 
-    # Healthy = in-range AND inside mask
-    # Instead of scanning the whole 2D array, index only mask pixels
-    ys, xs = mask_indices
-    healthy_flat = gmm_mask[ys, xs]
+    # Healthy = LUT AND neg_mask
+    healthy_mask = np.bitwise_and(lut_mask, ref.neg_mask)
 
-    # Count healthy pixels per column using bincount
+    # Flattened healthy pixels at mask locations
+    ys, xs = ref.mask_indices
+    healthy_flat = healthy_mask[ys, xs]
+
+    # Count healthy pixels per column
     healthy_counts = np.bincount(
-        mask_col_ids,
+        ref.mask_col_ids,
         weights=healthy_flat.astype(np.int32),
         minlength=w
     )
 
     # Precompute thresholds
-    thresholds = mask_counts * min_col_fraction
+    thresholds = ref.mask_counts * min_col_fraction
 
     # Local bindings for speed
     hc = healthy_counts
     thr = thresholds
-    mc = mask_counts
+    mc = ref.mask_counts
 
     # Step 1.1: Fast full-health early exit
     last_col = w - 1

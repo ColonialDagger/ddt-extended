@@ -9,7 +9,7 @@ import numpy.exceptions
 from windows_capture import WindowsCapture, Frame, InternalCaptureControl
 
 from scanner.capture_engine import CaptureState, detect_window_resolution
-from scanner.health_estimator import estimate_health
+from scanner.health_estimator import estimate_health, HealthReference
 from scanner.phase_tracker import PhaseTracker
 
 
@@ -95,22 +95,26 @@ class Scanner:
         # Measured boss health (0–1)
         self.health = 0
 
-        # Brightness related vars  # TODO Deprecate this or swap to CIELUV
+        # DEV tool to record all healthbar pixels to a CSV file.
         self.get_colors = get_colors
 
-        # Per-brightness GMM params
-        self.color_reference = self.COLOR_REFS[colorblind_mode]  # TODO REPLACE WITH COLORBLIND MODE
+        # Defines reference object
+        self.reference_data = HealthReference()
+
+        # Load LUT for this colorblind mode
+        lut_raw = np.fromfile(f"luts/{colorblind_mode}.bin", dtype=np.uint32)
+        self.reference_data.lut = lut_raw.reshape(256, 256)
 
         # Define mask for pixel capture
         negative = cv2.imread(f"negatives/{self.resolution[0]}x{self.resolution[1]}_negative.png")
         self.y1, self.y2, self.x1, self.x2 = self._crop_dimensions_from_image(negative)
-        self.neg_mask = self._crop_neg_mask(negative, self.y1, self.y2, self.x1, self.x2)
+        self.reference_data.neg_mask = self._crop_neg_mask(negative, self.y1, self.y2, self.x1, self.x2)
 
         # Precompute mask pixel counts (per column) and flattened mask indices
-        ys, xs = np.where(self.neg_mask)
-        self.mask_indices = (ys, xs)  # flattened mask coordinates
-        self.mask_col_ids = xs  # column index for each mask pixel
-        self.mask_counts = np.bincount(xs, minlength=self.neg_mask.shape[1])
+        ys, xs = np.where(self.reference_data.neg_mask)
+        self.reference_data.mask_indices = (ys, xs)  # flattened mask coordinates
+        self.reference_data.mask_col_ids = xs  # column index for each mask pixel
+        self.reference_data.mask_counts = np.bincount(xs, minlength=self.reference_data.neg_mask.shape[1])
 
         # Buffer that contains last x frames
         self.smoothing = HealthSmoothing(size=health_buffer_size)
@@ -263,11 +267,7 @@ class Scanner:
 
         raw_health_fraction = estimate_health(
             cropped_img=cropped,
-            neg_mask=self.neg_mask,
-            mask_indices=self.mask_indices,
-            mask_col_ids=self.mask_col_ids,
-            mask_counts=self.mask_counts,
-            color_reference=self.color_reference,
+            ref=self.reference_data,
             min_col_fraction=0.60,  # TODO Try reducing this and see what happens. Consider Golden Gun, etc.
             edge_width=1
         )
@@ -292,7 +292,7 @@ class Scanner:
             now=now,
             current_health=new_health_fraction,
             cropped_img=cropped,
-            neg_mask=self.neg_mask
+            neg_mask=self.reference_data.neg_mask
         )
 
         # Publish health for external callers
@@ -300,7 +300,7 @@ class Scanner:
 
         # Sends pixel data to a CSV file. Used to determine color data
         if self.pixel_output:
-            self._pixels_to_csv(self.pixel_output, cropped[self.neg_mask])
+            self._pixels_to_csv(self.pixel_output, cropped[self.reference_data.neg_mask])
 
         return
 
