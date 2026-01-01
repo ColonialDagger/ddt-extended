@@ -229,6 +229,7 @@ class MainWindow(QMainWindow):
 
         # Live Health Graph (H%/t)
         self._health_times.append(now)
+        self._health_values.append(health)
 
         if len(self._health_times) > 2000:
             self._health_times = self._health_times[-2000:]
@@ -242,7 +243,7 @@ class MainWindow(QMainWindow):
         # Find the earliest index within the window
         cutoff = now - WINDOW
         i = len(self._health_times) - 1
-        while i > 0 and self._health_times[i] > cutoff:
+        while i > 0 and self._health_times[ i] > cutoff:
             i -= 1
 
         dh = self._health_values[-1] - self._health_values[i]
