@@ -27,6 +27,7 @@ class Scanner:
     Scans an active Destiny 2 window to report health of a given boss.
     """
 
+
     def __init__(
             self,
             colorblind_mode: str = "normal",
@@ -232,14 +233,9 @@ class Scanner:
             buf.pop(0)
         new_health_fraction = min(buf)  # 0–1
 
-        # Timing data
-        now = time.time()
-        self.dt = now - self.last_t
-        self.last_t = now
-
         # Phase tracking update (includes visibility)
         self.phase_tracker.update(
-            now=now,
+            now=time.time(),
             current_health=new_health_fraction,
             cropped_img=cropped,
             neg_mask=self.reference_data.neg_mask
@@ -251,6 +247,11 @@ class Scanner:
         # Sends pixel data to a CSV file. Used to determine color data
         if self.pixel_output:
             self._pixels_to_csv(self.pixel_output, cropped[self.reference_data.neg_mask])
+
+        # Timing data
+        now = time.perf_counter()
+        self.dt = now - self.last_t
+        self.last_t = now
 
         return
 
