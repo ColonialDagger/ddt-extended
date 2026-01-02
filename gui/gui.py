@@ -19,7 +19,7 @@ class MainWindow(QMainWindow):
     """
 
     # Thread‑safe status update signal
-    status_update = Signal(str)
+    phase_label = Signal(str)
 
     def __init__(self):
         """
@@ -147,7 +147,7 @@ class MainWindow(QMainWindow):
         self._timer.start()
 
         # Connect signal to label
-        self.status_update.connect(self.status_label.setText)
+        self.phase_label.connect(self.status_label.setText)
 
         self.apply_button.clicked.connect(self.apply_settings)
 
@@ -181,7 +181,7 @@ class MainWindow(QMainWindow):
         while not self._scanner_ready:
             try:
                 print("Trying to create scanner...")
-                self.status_update.emit("Status: Searching for Destiny 2…")
+                self.phase_label.emit("Status: Searching for Destiny 2…")
 
                 s = scanner.Scanner(
                     colorblind_mode=colorblind_mode,
@@ -194,7 +194,7 @@ class MainWindow(QMainWindow):
                 self._scanner = s
                 self._scanner_ready = True
 
-                self.status_update.emit("Status: Connected")
+                self.phase_label.emit("Status: Connected")
                 print("Scanner is now running.")
                 return
 
@@ -218,11 +218,13 @@ class MainWindow(QMainWindow):
         health = self._scanner.get_health()
         fps = self._scanner.get_fps()
         delta = self._scanner.get_dt()
+        phase_state = self._scanner.get_phase_active()
 
         # Update labels
         self.health_label.setText(f"Health: {health:.2f}%")
         self.fps_label.setText(f"FPS: {fps:.1f}")
         self.delta_label.setText(f"Δt: {delta * 1000:.2f} ms")
+        self.phase_label.emit("Phase: Active") if phase_state else self.phase_label.emit("Phase: Not Active")
 
         # Time base
         now = time.time() - self._t0
@@ -271,7 +273,7 @@ class MainWindow(QMainWindow):
                 f"Health: {health:.2f}%",
                 f"FPS: {fps:.1f}",
                 f"Δt: {delta * 1000:.2f} ms",
-                f"Phase active: {self._scanner.get_phase_active()}",
+                f"Phase active: {phase_state}",
             ])
 
     def apply_settings(self):
@@ -289,7 +291,7 @@ class MainWindow(QMainWindow):
                 self.overlay.hide_overlay()
 
         print("Applying settings — restarting scanner...")
-        self.status_update.emit("Status: Restarting scanner…")
+        self.phase_label.emit("Status: Restarting scanner…")
 
         # Stop existing scanner
         if self._scanner:
