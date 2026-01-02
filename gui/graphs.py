@@ -1,3 +1,4 @@
+import numpy as np
 import pyqtgraph as pg
 from PySide6.QtWidgets import QWidget, QVBoxLayout
 
@@ -31,12 +32,12 @@ class HealthGraphWidget(QWidget):
 
         self.curve = self.plot.plot([], [], pen=pg.mkPen("red", width=2.5))
         self.zero_curve = pg.PlotCurveItem([], [], pen=None)
-        self.fill = pg.FillBetweenItem(
-            self.curve,
-            self.zero_curve,
-            brush=pg.mkBrush(255, 0, 0, 60)
-        )
-        self.plot.addItem(self.fill)
+        # self.fill = pg.FillBetweenItem(  # TODO Remove or find a faster way to do underfills
+        #     self.curve,
+        #     self.zero_curve,
+        #     brush=pg.mkBrush(255, 0, 0, 60)
+        # )
+        # self.plot.addItem(self.fill)
 
         self.plot.setXRange(-self._time_window, 0, padding=0)
         self.plot.setYRange(0, 100, padding=0)
@@ -52,23 +53,24 @@ class HealthGraphWidget(QWidget):
         if not times:
             return
 
-        # Trim to window
+        # Convert to numpy once
+        times = np.asarray(times, dtype=np.float32)
+        values = np.asarray(values, dtype=np.float32)
+
+        # Trim using vectorized operations
         t_max = times[-1]
         t_min = t_max - self._time_window
 
-        trimmed_t = []
-        trimmed_h = []
+        mask = times >= t_min
 
-        for t, h in zip(times, values):
-            if t >= t_min:
-                trimmed_t.append(t - t_max)
-                trimmed_h.append(h)
+        trimmed_t = times[mask] - t_max
+        trimmed_h = values[mask]
 
         # Update line
         self.curve.setData(trimmed_t, trimmed_h)
 
-        # Update fill (zero baseline)
-        self.zero_curve.setData(trimmed_t, [0] * len(trimmed_t))
+        # Update fill
+        # self.zero_curve.setData(trimmed_t, np.zeros_like(trimmed_t))  # TODO Remove or find a faster way to do underfills
 
 class DpsGraphWidget(QWidget):
     def __init__(self, parent=None, time_window=60.0):
@@ -97,12 +99,12 @@ class DpsGraphWidget(QWidget):
 
         self.curve = self.plot.plot([], [], pen=pg.mkPen("cyan", width=2.5))
         self.zero_curve = pg.PlotCurveItem([], [], pen=None)
-        self.fill = pg.FillBetweenItem(
-            self.curve,
-            self.zero_curve,
-            brush=pg.mkBrush(0, 255, 255, 60)
-        )
-        self.plot.addItem(self.fill)
+        # self.fill = pg.FillBetweenItem(  # TODO Remove or find a faster way to do underfills
+        #     self.curve,
+        #     self.zero_curve,
+        #     brush=pg.mkBrush(0, 255, 255, 60)
+        # )
+        # self.plot.addItem(self.fill)
 
         self.plot.setXRange(-self._time_window, 0, padding=0)
         self.plot.setYRange(0, self._ymax, padding=0)
@@ -136,7 +138,7 @@ class DpsGraphWidget(QWidget):
         self.curve.setData(trimmed_t, trimmed_d)
 
         # Update fill
-        self.zero_curve.setData(trimmed_t, [0] * len(trimmed_t))
+        # self.zero_curve.setData(trimmed_t, [0] * len(trimmed_t))  # TODO Remove or find a faster way to do underfills
 
         # Expand Y range only when needed
         d_max = max(trimmed_d)
@@ -174,12 +176,12 @@ class RollingDpsGraphWidget(QWidget):
         # Line + underfill
         self.curve = self.plot.plot([], [], pen=pg.mkPen("yellow", width=2.5))
         self.zero_curve = pg.PlotCurveItem([], [], pen=None)
-        self.fill = pg.FillBetweenItem(
-            self.curve,
-            self.zero_curve,
-            brush=pg.mkBrush(255, 255, 0, 60)
-        )
-        self.plot.addItem(self.fill)
+        # self.fill = pg.FillBetweenItem(  # TODO Remove or find a faster way to do underfills
+        #     self.curve,
+        #     self.zero_curve,
+        #     brush=pg.mkBrush(255, 255, 0, 60)
+        # )
+        # self.plot.addItem(self.fill)
 
         # Y-axis dynamic expansion
         self._ymax = 1
