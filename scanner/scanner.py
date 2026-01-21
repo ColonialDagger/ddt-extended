@@ -8,9 +8,14 @@ import numpy as np
 import numpy.exceptions
 from windows_capture import WindowsCapture, Frame, InternalCaptureControl
 
-from scanner.capture_engine import CaptureState, detect_window_resolution
-from scanner.health_estimator import estimate_health, HealthReference
-from scanner.phase_tracker import PhaseTracker
+if __name__ == "__main__":
+    from capture_engine import CaptureState, detect_window_resolution
+    from health_estimator import estimate_health, HealthReference
+    from phase_tracker import PhaseTracker
+else:
+    from scanner.capture_engine import CaptureState, detect_window_resolution
+    from scanner.health_estimator import estimate_health, HealthReference
+    from scanner.phase_tracker import PhaseTracker
 
 
 @dataclass
