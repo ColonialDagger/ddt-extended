@@ -48,8 +48,22 @@ python -m nuitka .\ddt.py `
   --windows-console-mode=disable
 ```
 
-## Known Issues
-* When opening the scanner, the derivative graph gridlines are not actualized until the first update.
+## Planned (or brainstormed) features
+* GUI updates
+  * Multiple phases in rolling DPS graph.
+  * Enable/disable phase tracking with hotkeys.
+  * Cumulative DPS over an entire phase.
+  * Track per-phase data (cumulative and 10s/20s/30s/average DPS).
+  * Toggle between percentage-based data and health-based data.
+  * OCR scanner for automatic boss identification.
+* Scanner updates
+  * Output phase data to a CSV.
+  * Final Stand percentage identifier. (What percent a final stand break is at, mostly for unknown bosses)
+  * Investigate if killing the GUI can create an orphaned scanner process.
+* Overlay
+  * Better placement of data.
+  * Add percentage markers to boss bar.
+  * 
 
 ## License
 This project is license under the GNU General Public License v3.0. See the [LICENSE](LICENSE) file and [tl;drLegal](https://www.tldrlegal.com/license/gnu-general-public-license-v3-gpl-3) for details.
