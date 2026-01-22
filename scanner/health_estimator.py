@@ -8,6 +8,51 @@ class HealthReference:
     mask_counts = None
     lut = None
 
+def _bgr_to_luv(bgr: np.ndarray) -> np.ndarray:
+    """
+    Converts image from BGR to LUV color space.
+
+    :param bgr:
+    :return:
+    """
+    b = bgr[..., 0].astype(np.float32)
+    g = bgr[..., 1].astype(np.float32)
+    r = bgr[..., 2].astype(np.float32)
+
+    def srgb_to_linear(c: np.ndarray) -> np.ndarray:
+        c = c / 255.0
+        return np.where(c <= 0.04045, c / 12.92, ((c + 0.055) / 1.055) ** 2.4)
+
+    r_lin = srgb_to_linear(r)
+    g_lin = srgb_to_linear(g)
+    b_lin = srgb_to_linear(b)
+
+    X = 0.4124 * r_lin + 0.3576 * g_lin + 0.1805 * b_lin
+    Y = 0.2126 * r_lin + 0.7152 * g_lin + 0.0722 * b_lin
+    Z = 0.0193 * r_lin + 0.1192 * g_lin + 0.9505 * b_lin
+
+    Xn, Yn, Zn = 0.95047, 1.0, 1.08883
+
+    denom = X + 15.0 * Y + 3.0 * Z
+    safe_denom = np.where(denom > 1e-9, denom, 1.0)
+
+    u_prime = 4.0 * X / safe_denom
+    v_prime = 9.0 * Y / safe_denom
+
+    denom_n = Xn + 15.0 * Yn + 3.0 * Zn
+    u_prime_n = 4.0 * Xn / denom_n
+    v_prime_n = 9.0 * Yn / denom_n
+
+    yr = Y / Yn
+    L = np.where(yr > 0.008856, 116.0 * np.cbrt(yr) - 16.0, 903.3 * yr)
+    L = np.maximum(L, 0.0)
+
+    u_star = 13.0 * L * (u_prime - u_prime_n)
+    v_star = 13.0 * L * (v_prime - v_prime_n)
+
+    return np.stack([L, u_star, v_star], axis=-1).astype(np.float32)
+
+
 def _gpu_uv_to_index(u_star: np.ndarray, v_star: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """
     Maps (u*, v*) → [0,255] UV-index space used by the GPU shader. This will match future compute shaders, assuming I
@@ -68,7 +113,7 @@ def estimate_health(
     h, w, _ = cropped_img.shape
 
     # Convert to LUV
-    luv = cv2.cvtColor(cropped_img, cv2.COLOR_BGR2LUV).astype(np.float32)
+    luv = _bgr_to_luv(cropped_img)
     u_star = luv[..., 1]
     v_star = luv[..., 2]
 
