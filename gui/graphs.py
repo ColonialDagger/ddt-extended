@@ -208,3 +208,8 @@ class RollingDpsGraphWidget(QWidget):
         d_max = max(dps_values)
         self.plot.setYRange(0, d_max * 1.1 if d_max > 0 else 1, padding=0)
 
+        # Expand X range as needed
+        t_max = times[-1]
+        self.plot.setXRange(0, t_max * 1.05, padding=0)
+
+
