@@ -3,19 +3,31 @@ import cv2
 import time
 import threading
 from dataclasses import dataclass, field
+from typing import Any
 
 import numpy as np
 import numpy.exceptions
 from windows_capture import WindowsCapture, Frame, InternalCaptureControl
 
 if __name__ == "__main__":
-    from capture_engine import CaptureState, detect_window_resolution
     from health_estimator import estimate_health, HealthReference
     from phase_tracker import PhaseTracker
 else:
-    from scanner.capture_engine import CaptureState, detect_window_resolution
     from scanner.health_estimator import estimate_health, HealthReference
     from scanner.phase_tracker import PhaseTracker
+
+
+class CaptureState:
+    """
+    Holds the capture agent of the health scanner.
+
+    Does not hold the actual start/stop capture functions which are located in scanner/scanner.py for optimization.
+    See scanner.Scanner.start_capture() for more details.
+    """
+    stop_requested: bool = False
+    control: InternalCaptureControl | None = None
+    last_cropped_img: Any | None = None
+    delta_t: float = 1.0
 
 
 @dataclass
@@ -46,7 +58,7 @@ class Scanner:
         self.pixel_output = pixel_output if pixel_output else None
 
         # Get resolution from Destiny 2 window
-        self.resolution = detect_window_resolution(self.window_name)
+        self.resolution = self._detect_window_resolution(window_name=self.window_name)
 
         # Measured boss health (0–1)
         self.health = 0
@@ -95,8 +107,6 @@ class Scanner:
 
         Don't touch anything here. This is a black hole that I got working and won't touch unless you absolutely
         have to. Every time I touch something, it breaks again.
-
-        This is not in scanner/capture_engine.py due to function callbacks causing much higher process times.
 
         :return: None
         """
@@ -321,6 +331,50 @@ class Scanner:
         right = xs.max()
 
         return top, bottom, left, right
+
+    @staticmethod
+    def _detect_window_resolution(window_name: str, timeout: float = 0.1) -> tuple[int, int]:
+        """
+        Detects the resolution of the target window using Windows Graphics Capture.
+        """
+        deadline = time.time() + timeout
+        searching = True
+        resolution: tuple[int, int] | None = None
+
+        while searching:
+            try:
+                # Every Error From on_closed and on_frame_arrived Will End Up Here
+                capture = WindowsCapture(
+                    cursor_capture=False,
+                    draw_border=False,
+                    monitor_index=None,
+                    window_name=window_name,
+                )
+
+                # Called Every Time A New Frame Is Available
+                @capture.event
+                def on_frame_arrived(frame: Frame, capture_control: InternalCaptureControl):
+                    nonlocal resolution, searching
+                    h, w = frame.frame_buffer.shape[:2]
+                    resolution = (w, h)
+                    searching = False
+                    capture_control.stop()
+
+                # Called When The Capture Item Closes Usually When The Window Closes, Capture
+                # Session Will End After This Function Ends
+                @capture.event
+                def on_closed():
+                    raise RuntimeError("Window closed while determining resolution")
+
+                capture.start()
+            except:  # Always pass, true limiter is the timeout
+                if time.time() > deadline:
+                    raise TimeoutError("Timed out while determining window resolution")
+
+        if resolution is None:
+            raise TimeoutError("Timed out while determining window resolution")
+
+        return resolution
 
 
 def main():
