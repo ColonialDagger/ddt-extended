@@ -97,7 +97,7 @@ class Scanner:
         )
 
         # Time tracking
-        self.last_t = time.time()
+        self.last_t = time.perf_counter()
         self.dt = 0
 
     def start_capture(self) -> None:
