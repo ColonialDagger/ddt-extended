@@ -128,6 +128,14 @@ class MainWindow(QMainWindow):
         )
         form.addRow("", self.overlay_toggle)
 
+        self.phase_tracking_enabled = True  # Default state
+        self.phase_tracking_toggle = QCheckBox("Enable Phase Tracking")
+        self.phase_tracking_toggle.setChecked(True)
+        self.phase_tracking_toggle.setToolTip(
+            "Toggle automatic phase detection and rolling DPS tracking."
+        )
+        form.addRow("", self.phase_tracking_toggle)
+
         self.apply_button = QPushButton("Apply Settings")
         form.addRow("", self.apply_button)
 
@@ -187,6 +195,7 @@ class MainWindow(QMainWindow):
                     colorblind_mode=colorblind_mode,
                     health_buffer_size=buffer_size
                 )
+                s.phase_tracking_enabled = self.phase_tracking_toggle.isChecked()
 
                 print("Scanner created, starting capture...")
                 s.start_capture()

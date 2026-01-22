@@ -239,12 +239,18 @@ class Scanner:
         new_health_fraction = min(buf)  # 0–1
 
         # Phase tracking update (includes visibility)
-        self.phase_tracker.update(
-            now=time.time(),
-            current_health=new_health_fraction,
-            cropped_img=cropped,
-            neg_mask=self.reference_data.neg_mask
-        )
+        if self.phase_tracking_enabled:
+            self.phase_tracker.update(
+                now=time.time(),
+                current_health=new_health_fraction,
+                cropped_img=cropped,
+                neg_mask=self.reference_data.neg_mask
+            )
+        else:
+            # If phase tracker is disabled, freeze phase state
+            self.phase_tracker.state.active = False
+            self.phase_tracker.state.time_history.clear()
+            self.phase_tracker.state.dps_history.clear()
 
         # Publish health for external callers
         self.health = new_health_fraction
